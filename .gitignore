@@ -1,0 +1,38 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# pycharm files
+.DS_Store
+.idea
+*/.DS_Store
+*/.idea
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# data and submission files
+*.csv
+*.csv.gz
+*.pickle
+
+# tensorboard logs
+*/logs/*
+*/submissions/*/logs/*
+
+# model weights
+*/weights/*
+*/submissions/*/weights/*
+
+# competition guidelines
+*.pdf
+
+# exceptions
+!*.keep
