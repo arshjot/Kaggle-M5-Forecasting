@@ -3,6 +3,12 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# pycharm files
+.DS_Store
+.idea
+*/.DS_Store
+*/.idea
+
 # C extensions
 *.so
 
@@ -27,3 +33,6 @@ __pycache__/
 
 # competition guidelines
 *.pdf
+
+# exceptions
+!*.keep
