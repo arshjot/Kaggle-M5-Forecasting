@@ -141,7 +141,6 @@ def read_data(input_data_dir='../../data/', output_dir='./'):
 
     # change dtypes
     data_df[['prev_day_sales']] = data_df[['prev_day_sales']].astype(np.int16)
-    data_df[['sell_price']] = data_df[['sell_price']].astype(np.float16)
 
     # ---- Add previous day totals of aggregated series as features ---- #
     print('* Add previous day totals of aggregated series as features')
@@ -185,12 +184,13 @@ def read_data(input_data_dir='../../data/', output_dir='./'):
     num_samples = data_df.id.nunique()
     num_timesteps = data_df.d.nunique()
     data_df = data_df.set_index(['id', 'd'])
-
+    
+    ids = ['item_id', 'dept_id', 'cat_id', 'store_id', 'state_id']
     enc_dec_feats = ['sell_price', 'cat_id_enc_HOBBIES', 'cat_id_enc_HOUSEHOLD', 'cat_id_enc_FOODS', 'state_id_enc_CA',
                      'state_id_enc_TX', 'state_id_enc_WI', 'item_id_enc', 'dept_id_enc', 'store_id_enc']
     enc_only_feats = data_df.columns.difference(['sales', 'sell_price', 'prev_day_sales'] + enc_dec_feats)
 
-    sales_data_index = data_df.index
+    sales_data_ids = train_data[ids].values
     Y = data_df.sales.values.reshape(num_timesteps, num_samples).T
     X_enc_only_feats = np.array(data_df[enc_only_feats]).reshape(num_timesteps, num_samples, -1)
     X_enc_dec_feats = np.array(data_df[enc_dec_feats]).reshape(num_timesteps, num_samples, -1)
@@ -207,7 +207,7 @@ def read_data(input_data_dir='../../data/', output_dir='./'):
 
     # ---- Save processed data ---- #
     print('* Save processed data')
-    data_dict = {'sales_data_index': sales_data_index, 'calendar_index': calendar_index,
+    data_dict = {'sales_data_ids': sales_data_ids, 'calendar_index': calendar_index,
                  'X_prev_day_sales': X_prev_day_sales,
                  'X_enc_only_feats': X_enc_only_feats, 'X_enc_dec_feats' : X_enc_dec_feats,
                  'enc_dec_feat_names': enc_dec_feats, 'enc_only_feat_names': enc_only_feats,
