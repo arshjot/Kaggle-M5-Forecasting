@@ -199,11 +199,11 @@ def read_data(input_data_dir='../../data/', output_dir='./'):
     X_calendar = np.array(calendar_df.iloc[:, 2:])
     X_calendar_cols = list(calendar_df.columns[2:])
 
-    # for prev_day_sales and sales (y), set value as -1 for the period the product was not actively sold
-    for idx, first_non_zero_idx in enumerate((X_prev_day_sales != 0).argmax(axis=0)):
-        X_prev_day_sales[:first_non_zero_idx, idx] = -1
-    for idx, first_non_zero_idx in enumerate((Y != 0).argmax(axis=1)):
-        Y[idx, :first_non_zero_idx] = -1
+    # # for prev_day_sales and sales (y), set value as -1 for the period the product was not actively sold
+    # for idx, first_non_zero_idx in enumerate((X_prev_day_sales != 0).argmax(axis=0)):
+    #     X_prev_day_sales[:first_non_zero_idx, idx] = -1
+    # for idx, first_non_zero_idx in enumerate((Y != 0).argmax(axis=1)):
+    #     Y[idx, :first_non_zero_idx] = -1
 
     # ---- Save processed data ---- #
     print('* Save processed data')

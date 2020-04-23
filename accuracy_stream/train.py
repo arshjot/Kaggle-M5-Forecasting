@@ -1,18 +1,17 @@
-# TODO: Add WRMSSE as metric (for all 42,840 series)
 # TODO: Add WRMSSE as loss (for 30,490 series)
 # TODO: Add callbacks
 
 import torch
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
-import numpy as np
 from importlib import import_module
 import shutil
 import glob
 import os
 
 from data_loader.data_generator import DataLoader
-from losses_and_metrics import loss_functions
+from utils.utils import *
+from losses_and_metrics import loss_functions, metrics
 from config import Config
 
 seed = 0
@@ -38,10 +37,20 @@ class Trainer:
         self.criterion = getattr(loss_functions, config.loss_fn)()
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.config.learning_rate)
 
+        # Metric
+        self.metric = getattr(metrics, config.metric)()
+
         print(f' Loading data '.center(self.terminal_width, '*'))
         data_loader = DataLoader(self.config)
+        self.ids = data_loader.ids
         self.train_loader = data_loader.create_train_loader()
         self.val_loader = data_loader.create_val_loader()
+        self.train_metric_t, self.train_metric_w, self.train_metric_s = data_loader.get_weights_and_scaling(
+            self.config.training_ts['data_start_t'], self.config.training_ts['horizon_start_t'],
+            self.config.training_ts['horizon_end_t'])
+        self.val_metric_t, self.val_metric_w, self.val_metric_s = data_loader.get_weights_and_scaling(
+            self.config.validation_ts['data_start_t'], self.config.validation_ts['horizon_start_t'],
+            self.config.validation_ts['horizon_end_t'])
 
         # logging
         # remove previous logs, if any
@@ -50,57 +59,74 @@ class Trainer:
             os.remove(f)
         self.writer = SummaryWriter('logs')
 
-    def _get_val_loss(self):
+    def _get_val_loss_and_err(self):
         self.model.eval()
         progbar = tqdm(self.val_loader)
         progbar.set_description("             ")
-        losses = []
-        for i, [x, y, loss_input] in enumerate(progbar):
+        losses, epoch_preds, epoch_ids = [], [], []
+        for i, [x, y, ids_idx, loss_input] in enumerate(progbar):
             x = [inp.to(self.config.device) for inp in x]
             y = y.to(self.config.device)
             loss_input = [inp.to(self.config.device) for inp in loss_input]
+            epoch_ids.append(self.ids[ids_idx])
 
             preds = self.model(*x)
+            epoch_preds.append(preds.data.cpu().numpy())
             loss = self.criterion(preds, y, loss_input[0])
-            loss_iter = loss.data.cpu().numpy()
-            losses.append(loss_iter)
+            losses.append(loss.data.cpu().numpy())
 
-        return np.mean(losses)
+        validation_agg_preds, _ = get_aggregated_series(np.concatenate(epoch_preds, axis=0),
+                                                        *[np.concatenate(epoch_ids, axis=0)[:, i] for i in range(0, 5)])
+        val_error = self.metric.get_error(validation_agg_preds, self.val_metric_t, self.val_metric_s, self.val_metric_w)
+
+        return np.mean(losses), val_error
 
     def train(self):
         print(f' Training '.center(self.terminal_width, '*'), end='\n\n')
-        min_val_loss = 100
+        min_val_error = 100
         for epoch in range(self.config.num_epochs):
             print(f' Epoch [{epoch + 1}/{self.config.num_epochs}] '.center(self.terminal_width, 'x'))
             self.model.train()
             progbar = tqdm(self.train_loader)
-            losses = []
-            for i, [x, y, loss_input] in enumerate(progbar):
+            losses, epoch_preds, epoch_ids = [], [], []
+            for i, [x, y, ids_idx, loss_input] in enumerate(progbar):
                 x = [inp.to(self.config.device) for inp in x]
                 y = y.to(self.config.device)
                 loss_input = [inp.to(self.config.device) for inp in loss_input]
+                epoch_ids.append(self.ids[ids_idx])
 
                 # Forward + Backward + Optimize
                 self.optimizer.zero_grad()
                 preds = self.model(*x)
+                epoch_preds.append(preds.data.cpu().numpy())
                 loss = self.criterion(preds, y, loss_input[0])
-                loss_iter = loss.data.cpu().numpy()
-                losses.append(loss_iter)
+                losses.append(loss.data.cpu().numpy())
                 progbar.set_description("loss = %0.3f " % np.round(np.mean(losses), 3))
                 loss.backward()
                 self.optimizer.step()
 
-            val_loss = self._get_val_loss()
-            print(f'Training Loss: {np.mean(losses):.4f}, Validation Loss: {val_loss:.4f}')
+            # Get training and validation loss and error
+            training_agg_preds, _ = get_aggregated_series(np.concatenate(epoch_preds, axis=0),
+                                                          *[np.concatenate(epoch_ids, axis=0)[:, i]
+                                                            for i in range(0, 5)])
+            train_loss = np.mean(losses)
+            train_error = self.metric.get_error(training_agg_preds, self.train_metric_t,
+                                                self.train_metric_s, self.train_metric_w)
+
+            val_loss, val_error = self._get_val_loss_and_err()
+            print(f'Training Loss: {train_loss:.4f}, Training Error: {train_error:.4f}, '
+                  f'Validation Loss: {val_loss:.4f}, Validation Error: {val_error:.4f}')
 
             # save best model
-            if val_loss < min_val_loss:
-                min_val_loss = val_loss
+            if val_error < min_val_error:
+                min_val_error = val_error
                 torch.save(self.model.state_dict(), './weights/model.pth.tar')
 
             # write logs
-            self.writer.add_scalar(f'{self.config.loss_fn}/train', np.mean(losses), (epoch + 1) * i)
+            self.writer.add_scalar(f'{self.config.loss_fn}/train', train_loss, (epoch + 1) * i)
             self.writer.add_scalar(f'{self.config.loss_fn}/val', val_loss, (epoch + 1) * i)
+            self.writer.add_scalar(f'{self.config.metric}/train', train_error, (epoch + 1) * i)
+            self.writer.add_scalar(f'{self.config.metric}/val', val_error, (epoch + 1) * i)
 
         self.writer.close()
 

@@ -1,8 +1,13 @@
+import sys
+
+sys.path.extend(['..'])
+
 import torch
 import torch.utils.data
 import torch.utils.data as data_utils
-import numpy as np
 import pickle as pkl
+
+from utils.utils import *
 
 
 # Dataset (Input Pipeline)
@@ -34,7 +39,8 @@ class CustomDataset(data_utils.Dataset):
     """
 
     def __init__(self, X_prev_day_sales, X_enc_only_feats, X_enc_dec_feats, X_calendar, X_last_day_sales,
-                 Y=None, rmsse_denominator=None, transform=None):
+                 Y=None, rmsse_denominator=None):
+
         self.X_prev_day_sales = X_prev_day_sales
         self.X_enc_only_feats = X_enc_only_feats
         self.X_enc_dec_feats = X_enc_dec_feats
@@ -46,8 +52,6 @@ class CustomDataset(data_utils.Dataset):
             self.rmsse_denominator = torch.from_numpy(rmsse_denominator).float()
         else:
             self.Y = None
-
-        self.transform = transform
 
     def __len__(self):
         return self.X_prev_day_sales.shape[1]
@@ -83,6 +87,7 @@ class CustomDataset(data_utils.Dataset):
                 torch.from_numpy(x_dec).float(), torch.from_numpy(x_dec_emb).long(),
                 torch.from_numpy(x_last_day_sales).float()],
                 self.Y[idx, :],
+                idx,
                 [self.rmsse_denominator[idx]]]
 
 
@@ -94,19 +99,24 @@ class DataLoader:
         with open(f'{self.config.data_file}', 'rb') as f:
             data_dict = pkl.load(f)
 
+        self.ids = data_dict['sales_data_ids']
         self.X_prev_day_sales = data_dict['X_prev_day_sales']
         self.X_enc_only_feats = data_dict['X_enc_only_feats']
         self.X_enc_dec_feats = data_dict['X_enc_dec_feats']
         self.X_calendar = data_dict['X_calendar']
+        self.enc_dec_feat_names = data_dict['enc_dec_feat_names']
         self.Y = data_dict['Y']
 
-    def create_train_loader(self, data_start_t=1969 - 1 - 1968, horizon_start_t=1969 - 1 - (28*4),
-                            horizon_end_t=1969 - 1 - (28*3)):
+    def create_train_loader(self, data_start_t=None, horizon_start_t=None, horizon_end_t=None):
+        if (data_start_t is None) | (horizon_start_t is None) | (horizon_end_t is None):
+            data_start_t = self.config.training_ts['data_start_t']
+            horizon_start_t = self.config.training_ts['horizon_start_t']
+            horizon_end_t = self.config.training_ts['horizon_end_t']
 
         # calculate denominator for rmsse loss
         squared_movement = ((self.Y.T[data_start_t:horizon_start_t] -
                              self.X_prev_day_sales[data_start_t:horizon_start_t]).astype(np.int64) ** 2)
-        actively_sold_in_range = (self.X_prev_day_sales[data_start_t:horizon_start_t] != -1).argmax(axis=0)
+        actively_sold_in_range = (self.X_prev_day_sales[data_start_t:horizon_start_t] != 0).argmax(axis=0)
         rmsse_den = []
         for idx, first_active_sell_idx in enumerate(actively_sold_in_range):
             rmsse_den.append(squared_movement[first_active_sell_idx:, idx].mean())
@@ -121,13 +131,16 @@ class DataLoader:
         return torch.utils.data.DataLoader(dataset=dataset, batch_size=self.config.batch_size, shuffle=True,
                                            num_workers=3, pin_memory=True)
 
-    def create_val_loader(self, data_start_t=1969 - 1 - 1968, horizon_start_t=1969 - 1 - (28*3),
-                          horizon_end_t=1969 - 1 - (28 * 2)):
+    def create_val_loader(self, data_start_t=None, horizon_start_t=None, horizon_end_t=None):
+        if (data_start_t is None) | (horizon_start_t is None) | (horizon_end_t is None):
+            data_start_t = self.config.validation_ts['data_start_t']
+            horizon_start_t = self.config.validation_ts['horizon_start_t']
+            horizon_end_t = self.config.validation_ts['horizon_end_t']
 
         # calculate denominator for rmsse loss
         squared_movement = ((self.Y.T[data_start_t:horizon_start_t] -
                              self.X_prev_day_sales[data_start_t:horizon_start_t]).astype(np.int64) ** 2)
-        actively_sold_in_range = (self.X_prev_day_sales[data_start_t:horizon_start_t] != -1).argmax(axis=0)
+        actively_sold_in_range = (self.X_prev_day_sales[data_start_t:horizon_start_t] != 0).argmax(axis=0)
         rmsse_den = []
         for idx, first_active_sell_idx in enumerate(actively_sold_in_range):
             rmsse_den.append(squared_movement[first_active_sell_idx:, idx].mean())
@@ -142,8 +155,11 @@ class DataLoader:
         return torch.utils.data.DataLoader(dataset=dataset, batch_size=self.config.batch_size, num_workers=3,
                                            pin_memory=True)
 
-    def create_test_loader(self, data_start_t=1969 - 1 - 1968, horizon_start_t=1969 - 1 - (28 * 2),
-                           horizon_end_t=1969 - 1 - (28 * 1)):
+    def create_test_loader(self, data_start_t=None, horizon_start_t=None, horizon_end_t=None):
+        if (data_start_t is None) | (horizon_start_t is None) | (horizon_end_t is None):
+            data_start_t = self.config.test_ts['data_start_t']
+            horizon_start_t = self.config.test_ts['horizon_start_t']
+            horizon_end_t = self.config.test_ts['horizon_end_t']
 
         dataset = CustomDataset(self.X_prev_day_sales[data_start_t:horizon_start_t],
                                 self.X_enc_only_feats[data_start_t:horizon_start_t],
@@ -152,3 +168,31 @@ class DataLoader:
 
         return torch.utils.data.DataLoader(dataset=dataset, batch_size=self.config.batch_size, num_workers=3,
                                            pin_memory=True)
+
+    def get_weights_and_scaling(self, data_start_t, horizon_start_t, horizon_end_t):
+        """Returns aggregated target, weights and rmsse scaling factors for series of all 12 levels"""
+
+        # Get aggregated series
+        agg_series_Y, agg_series_id = get_aggregated_series(self.Y[:, data_start_t:horizon_end_t],
+                                                            *[self.ids[:, i] for i in range(0, 5)])
+        agg_target = agg_series_Y[:, horizon_start_t:]
+        agg_series_Y = agg_series_Y[:, data_start_t:horizon_start_t]
+        agg_series_prev_day_sales, _ = get_aggregated_series(self.X_prev_day_sales.T[:, data_start_t:horizon_start_t],
+                                                             *[self.ids[:, i] for i in range(0, 5)])
+
+        # calculate denominator for rmsse loss
+        squared_movement = ((agg_series_Y.T - agg_series_prev_day_sales.T).astype(np.int64) ** 2)
+        actively_sold_in_range = (agg_series_prev_day_sales.T != 0).argmax(axis=0)
+        rmsse_den = []
+        for idx, first_active_sell_idx in enumerate(actively_sold_in_range):
+            rmsse_den.append(squared_movement[first_active_sell_idx:, idx].mean())
+
+        # Get weights
+        sell_price_i = self.enc_dec_feat_names.index('sell_price')
+        weights, _ = get_weights_all_levels(self.Y[:, horizon_start_t-28:horizon_start_t],
+                                            self.X_enc_dec_feats[horizon_start_t-28:horizon_start_t, :, sell_price_i].T,
+                                            *[self.ids[:, i] for i in range(0, 5)])
+
+        return agg_target, weights, np.array(rmsse_den)
+
+
