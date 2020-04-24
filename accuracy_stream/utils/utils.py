@@ -127,3 +127,23 @@ def get_weights_all_levels(sales, sell_price, item_id, dept_id, cat_id, store_id
     weights = agg_series / level_totals
 
     return weights, agg_series_id
+
+
+def get_weights_level_12(sales, sell_price):
+    """
+    Generates weights for only 30,490 level 12 series
+
+    Input data format:
+    sales: np array of shape (30490, 28)
+    sell_price: np array of shape (30490, 28)
+    """
+
+    assert (sales.shape == sell_price.shape), "Sell price and Sales arrays have different sizes"
+    assert (sales.shape[1] == 28), "Number of timesteps provided weight calculation is not equal to 28"
+
+    # Get actual dollar sales for last 28 days and sum them up
+    dollar_sales = (sales * sell_price).sum(1)
+    # Calculate weight for each series
+    weights = dollar_sales / dollar_sales.sum()
+
+    return weights

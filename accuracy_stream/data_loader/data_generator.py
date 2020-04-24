@@ -39,7 +39,7 @@ class CustomDataset(data_utils.Dataset):
     """
 
     def __init__(self, X_prev_day_sales, X_enc_only_feats, X_enc_dec_feats, X_calendar, X_last_day_sales,
-                 Y=None, rmsse_denominator=None):
+                 Y=None, rmsse_denominator=None, wrmsse_weights=None):
 
         self.X_prev_day_sales = X_prev_day_sales
         self.X_enc_only_feats = X_enc_only_feats
@@ -50,6 +50,7 @@ class CustomDataset(data_utils.Dataset):
         if Y is not None:
             self.Y = torch.from_numpy(Y).float()
             self.rmsse_denominator = torch.from_numpy(rmsse_denominator).float()
+            self.wrmsse_weights = torch.from_numpy(wrmsse_weights).float()
         else:
             self.Y = None
 
@@ -88,7 +89,7 @@ class CustomDataset(data_utils.Dataset):
                 torch.from_numpy(x_last_day_sales).float()],
                 self.Y[idx, :],
                 idx,
-                [self.rmsse_denominator[idx]]]
+                [self.rmsse_denominator[idx], self.wrmsse_weights[idx]]]
 
 
 class DataLoader:
@@ -121,12 +122,17 @@ class DataLoader:
         for idx, first_active_sell_idx in enumerate(actively_sold_in_range):
             rmsse_den.append(squared_movement[first_active_sell_idx:, idx].mean())
 
+        # Get level 12 weights for WRMSSE loss (level 12)
+        sell_price_i = self.enc_dec_feat_names.index('sell_price')
+        weights = get_weights_level_12(self.Y[:, horizon_start_t-28:horizon_start_t],
+                                       self.X_enc_dec_feats[horizon_start_t-28:horizon_start_t, :, sell_price_i].T)
+
         dataset = CustomDataset(self.X_prev_day_sales[data_start_t:horizon_start_t],
                                 self.X_enc_only_feats[data_start_t:horizon_start_t],
                                 self.X_enc_dec_feats[data_start_t:horizon_end_t],
                                 self.X_calendar[data_start_t:horizon_end_t], self.X_prev_day_sales[horizon_start_t],
                                 Y=self.Y[:, horizon_start_t:horizon_end_t],
-                                rmsse_denominator=np.array(rmsse_den))
+                                rmsse_denominator=np.array(rmsse_den), wrmsse_weights=weights)
 
         return torch.utils.data.DataLoader(dataset=dataset, batch_size=self.config.batch_size, shuffle=True,
                                            num_workers=3, pin_memory=True)
@@ -145,12 +151,17 @@ class DataLoader:
         for idx, first_active_sell_idx in enumerate(actively_sold_in_range):
             rmsse_den.append(squared_movement[first_active_sell_idx:, idx].mean())
 
+        # Get level 12 weights for WRMSSE loss (level 12)
+        sell_price_i = self.enc_dec_feat_names.index('sell_price')
+        weights = get_weights_level_12(self.Y[:, horizon_start_t-28:horizon_start_t],
+                                       self.X_enc_dec_feats[horizon_start_t-28:horizon_start_t, :, sell_price_i].T)
+
         dataset = CustomDataset(self.X_prev_day_sales[data_start_t:horizon_start_t],
                                 self.X_enc_only_feats[data_start_t:horizon_start_t],
                                 self.X_enc_dec_feats[data_start_t:horizon_end_t],
                                 self.X_calendar[data_start_t:horizon_end_t], self.X_prev_day_sales[horizon_start_t],
                                 Y=self.Y[:, horizon_start_t:horizon_end_t],
-                                rmsse_denominator=np.array(rmsse_den))
+                                rmsse_denominator=np.array(rmsse_den), wrmsse_weights=weights)
 
         return torch.utils.data.DataLoader(dataset=dataset, batch_size=self.config.batch_size, num_workers=3,
                                            pin_memory=True)

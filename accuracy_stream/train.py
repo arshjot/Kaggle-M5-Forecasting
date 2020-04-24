@@ -1,4 +1,3 @@
-# TODO: Add WRMSSE as loss (for 30,490 series)
 # TODO: Add callbacks
 
 import torch
@@ -36,6 +35,7 @@ class Trainer:
         # Loss and Optimizer
         self.criterion = getattr(loss_functions, config.loss_fn)()
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.config.learning_rate)
+        self.loss_agg = np.sum if config.loss_fn[:6] == 'WRMSSE' else np.mean
 
         # Metric
         self.metric = getattr(metrics, config.metric)()
@@ -72,14 +72,14 @@ class Trainer:
 
             preds = self.model(*x)
             epoch_preds.append(preds.data.cpu().numpy())
-            loss = self.criterion(preds, y, loss_input[0])
+            loss = self.criterion(preds, y, *loss_input)
             losses.append(loss.data.cpu().numpy())
 
         validation_agg_preds, _ = get_aggregated_series(np.concatenate(epoch_preds, axis=0),
                                                         *[np.concatenate(epoch_ids, axis=0)[:, i] for i in range(0, 5)])
         val_error = self.metric.get_error(validation_agg_preds, self.val_metric_t, self.val_metric_s, self.val_metric_w)
 
-        return np.mean(losses), val_error
+        return self.loss_agg(losses), val_error
 
     def train(self):
         print(f' Training '.center(self.terminal_width, '*'), end='\n\n')
@@ -99,9 +99,13 @@ class Trainer:
                 self.optimizer.zero_grad()
                 preds = self.model(*x)
                 epoch_preds.append(preds.data.cpu().numpy())
-                loss = self.criterion(preds, y, loss_input[0])
+                loss = self.criterion(preds, y, *loss_input)
                 losses.append(loss.data.cpu().numpy())
-                progbar.set_description("loss = %0.3f " % np.round(np.mean(losses), 3))
+                if self.config.loss_fn[:6] == 'WRMSSE':
+                    progbar.set_description("loss = %0.3f " % np.round(
+                        (len(self.train_loader) / (i+1)) * self.loss_agg(losses), 3))
+                else:
+                    progbar.set_description("loss = %0.3f " % np.round(self.loss_agg(losses), 3))
                 loss.backward()
                 self.optimizer.step()
 
@@ -109,7 +113,7 @@ class Trainer:
             training_agg_preds, _ = get_aggregated_series(np.concatenate(epoch_preds, axis=0),
                                                           *[np.concatenate(epoch_ids, axis=0)[:, i]
                                                             for i in range(0, 5)])
-            train_loss = np.mean(losses)
+            train_loss = self.loss_agg(losses)
             train_error = self.metric.get_error(training_agg_preds, self.train_metric_t,
                                                 self.train_metric_s, self.train_metric_w)
 
