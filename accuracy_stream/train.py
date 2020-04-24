@@ -39,6 +39,7 @@ class Trainer:
 
         # Metric
         self.metric = getattr(metrics, config.metric)()
+        self.metric_2 = getattr(loss_functions, config.secondary_metric)()
 
         print(f' Loading data '.center(self.terminal_width, '*'))
         data_loader = DataLoader(self.config)
@@ -63,7 +64,7 @@ class Trainer:
         self.model.eval()
         progbar = tqdm(self.val_loader)
         progbar.set_description("             ")
-        losses, epoch_preds, epoch_ids = [], [], []
+        losses, sec_metric, epoch_preds, epoch_ids = [], [], [], []
         for i, [x, y, ids_idx, loss_input] in enumerate(progbar):
             x = [inp.to(self.config.device) for inp in x]
             y = y.to(self.config.device)
@@ -74,12 +75,13 @@ class Trainer:
             epoch_preds.append(preds.data.cpu().numpy())
             loss = self.criterion(preds, y, *loss_input)
             losses.append(loss.data.cpu().numpy())
+            sec_metric.append(self.metric_2(preds, y, *loss_input).data.cpu().numpy())
 
         validation_agg_preds, _ = get_aggregated_series(np.concatenate(epoch_preds, axis=0),
                                                         *[np.concatenate(epoch_ids, axis=0)[:, i] for i in range(0, 5)])
         val_error = self.metric.get_error(validation_agg_preds, self.val_metric_t, self.val_metric_s, self.val_metric_w)
 
-        return self.loss_agg(losses), val_error
+        return self.loss_agg(losses), val_error, np.mean(sec_metric)
 
     def train(self):
         print(f' Training '.center(self.terminal_width, '*'), end='\n\n')
@@ -88,7 +90,7 @@ class Trainer:
             print(f' Epoch [{epoch + 1}/{self.config.num_epochs}] '.center(self.terminal_width, 'x'))
             self.model.train()
             progbar = tqdm(self.train_loader)
-            losses, epoch_preds, epoch_ids = [], [], []
+            losses, sec_metric, epoch_preds, epoch_ids = [], [], [], []
             for i, [x, y, ids_idx, loss_input] in enumerate(progbar):
                 x = [inp.to(self.config.device) for inp in x]
                 y = y.to(self.config.device)
@@ -101,11 +103,14 @@ class Trainer:
                 epoch_preds.append(preds.data.cpu().numpy())
                 loss = self.criterion(preds, y, *loss_input)
                 losses.append(loss.data.cpu().numpy())
+                sec_metric.append(self.metric_2(preds, y, *loss_input).data.cpu().numpy())
+
                 if self.config.loss_fn[:6] == 'WRMSSE':
                     progbar.set_description("loss = %0.3f " % np.round(
                         (len(self.train_loader) / (i+1)) * self.loss_agg(losses), 3))
                 else:
                     progbar.set_description("loss = %0.3f " % np.round(self.loss_agg(losses), 3))
+
                 loss.backward()
                 self.optimizer.step()
 
@@ -116,10 +121,13 @@ class Trainer:
             train_loss = self.loss_agg(losses)
             train_error = self.metric.get_error(training_agg_preds, self.train_metric_t,
                                                 self.train_metric_s, self.train_metric_w)
+            train_error_2 = np.mean(sec_metric)
 
-            val_loss, val_error = self._get_val_loss_and_err()
+            val_loss, val_error, val_error_2 = self._get_val_loss_and_err()
             print(f'Training Loss: {train_loss:.4f}, Training Error: {train_error:.4f}, '
-                  f'Validation Loss: {val_loss:.4f}, Validation Error: {val_error:.4f}')
+                  f'Training Secondary Error: {train_error_2:.4f}\n'
+                  f'Validation Loss: {val_loss:.4f}, Validation Error: {val_error:.4f}, '
+                  f'Validation Secondary Error: {val_error_2:.4f}')
 
             # save best model
             if val_error < min_val_error:
@@ -131,6 +139,8 @@ class Trainer:
             self.writer.add_scalar(f'{self.config.loss_fn}/val', val_loss, (epoch + 1) * i)
             self.writer.add_scalar(f'{self.config.metric}/train', train_error, (epoch + 1) * i)
             self.writer.add_scalar(f'{self.config.metric}/val', val_error, (epoch + 1) * i)
+            self.writer.add_scalar(f'{self.config.secondary_metric}/train', train_error_2, (epoch + 1) * i)
+            self.writer.add_scalar(f'{self.config.secondary_metric}/val', val_error_2, (epoch + 1) * i)
 
         self.writer.close()
 
