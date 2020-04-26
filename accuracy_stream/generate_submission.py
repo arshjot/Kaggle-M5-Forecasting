@@ -29,8 +29,7 @@ class SubmissionGenerator:
 
         self.sub_dir = self._prepare_dir()
 
-    @staticmethod
-    def _prepare_dir():
+    def _prepare_dir(self):
         print(f' Create submission directory '.center(self.terminal_width, '*'))
         sub_idx = max([int(i[3:]) for i in os.listdir('./submissions')]) + 1
 
