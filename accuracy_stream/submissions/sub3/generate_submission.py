@@ -36,12 +36,12 @@ class SubmissionGenerator:
         os.makedirs(f'./submissions/sub{sub_idx}')
 
         # copy model code to submission directory
-        shutil.copytree('losses_and_metrics/', f'./submissions/sub{sub_idx}/losses_and_metrics/')
-        shutil.copytree('./models/', f'./submissions/sub{sub_idx}/models/')
-        shutil.copytree('./weights/', f'./submissions/sub{sub_idx}/weights/')
-        shutil.copytree('./data_loader/', f'./submissions/sub{sub_idx}/data_loader/')
-        shutil.copytree('./utils/', f'./submissions/sub{sub_idx}/utils/')
-        shutil.copytree('./logs/', f'./submissions/sub{sub_idx}/logs/')
+        shutil.copytree('losses_and_metrics', f'./submissions/sub{sub_idx}/losses_and_metrics')
+        shutil.copytree('./models', f'./submissions/sub{sub_idx}/models')
+        shutil.copytree('./weights', f'./submissions/sub{sub_idx}/weights')
+        shutil.copytree('./data_loader', f'./submissions/sub{sub_idx}/data_loader')
+        shutil.copytree('./utils', f'./submissions/sub{sub_idx}/utils')
+        shutil.copytree('./logs', f'./submissions/sub{sub_idx}/logs')
 
         os.makedirs(f'./submissions/sub{sub_idx}/data')
         shutil.copyfile('./data/prepare_data.py', f'./submissions/sub{sub_idx}/data/prepare_data.py')
