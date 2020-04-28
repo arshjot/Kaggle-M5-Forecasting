@@ -3,6 +3,8 @@ import torch
 
 class Config:
 
+    resume_training = False
+
     loss_fn = 'WRMSSELevel12Loss'
     metric = 'WRMSSEMetric'
     secondary_metric = 'RMSSELoss'

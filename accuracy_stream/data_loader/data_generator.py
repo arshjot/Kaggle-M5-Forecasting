@@ -7,7 +7,7 @@ import torch.utils.data
 import torch.utils.data as data_utils
 import pickle as pkl
 
-from utils.utils import *
+from utils.data_utils import *
 
 
 # Dataset (Input Pipeline)

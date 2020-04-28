@@ -7,6 +7,7 @@ import os
 import shutil
 
 from data_loader.data_generator import DataLoader
+from utils.training_utils import ModelCheckpoint
 from config import Config
 
 
@@ -21,7 +22,8 @@ class SubmissionGenerator:
         create_model = getattr(model_type, 'create_model')
         self.model = create_model(self.config)
         print(self.model)
-        self.model.load_state_dict(torch.load('./weights/model.pth.tar'))
+        model_checkpoint = ModelCheckpoint()
+        self.model, _, _, _, _ = model_checkpoint.load(self.model, load_best=True)
 
         print(f' Loading data '.center(self.terminal_width, '*'))
         data_loader = DataLoader(self.config)

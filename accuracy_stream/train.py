@@ -1,4 +1,6 @@
-# TODO: Add callbacks
+# TODO: Add callbacks:
+#  1. EarlyStopping
+#  2. ReduceLROnPlateau
 
 import torch
 from torch.utils.tensorboard import SummaryWriter
@@ -9,7 +11,8 @@ import glob
 import os
 
 from data_loader.data_generator import DataLoader
-from utils.utils import *
+from utils.data_utils import *
+from utils.training_utils import ModelCheckpoint
 from losses_and_metrics import loss_functions, metrics
 from config import Config
 
@@ -53,11 +56,20 @@ class Trainer:
             self.config.validation_ts['data_start_t'], self.config.validation_ts['horizon_start_t'],
             self.config.validation_ts['horizon_end_t'])
 
+        self.start_epoch, self.min_val_error = 1, 100
+        # Load checkpoint if training is to be resumed
+        self.model_checkpoint = ModelCheckpoint()
+        if config.resume_training:
+            self.model, self.optimizer, _, self.start_epoch, self.min_val_error = self.model_checkpoint.load(
+                self.model, self.optimizer)
+            print(f'Resuming model training from epoch {self.start_epoch}')
+        else:
+            # remove previous logs, if any
+            logs = glob.glob('./logs/.*') + glob.glob('./logs/*')
+            for f in logs:
+                os.remove(f)
+
         # logging
-        # remove previous logs, if any
-        logs = glob.glob('./logs/.*') + glob.glob('./logs/*')
-        for f in logs:
-            os.remove(f)
         self.writer = SummaryWriter('logs')
 
     def _get_val_loss_and_err(self):
@@ -85,9 +97,8 @@ class Trainer:
 
     def train(self):
         print(f' Training '.center(self.terminal_width, '*'), end='\n\n')
-        min_val_error = 100
-        for epoch in range(self.config.num_epochs):
-            print(f' Epoch [{epoch + 1}/{self.config.num_epochs}] '.center(self.terminal_width, 'x'))
+        for epoch in range(self.start_epoch, self.config.num_epochs+1):
+            print(f' Epoch [{epoch}/{self.config.num_epochs}] '.center(self.terminal_width, 'x'))
             self.model.train()
             progbar = tqdm(self.train_loader)
             losses, sec_metric, epoch_preds, epoch_ids = [], [], [], []
@@ -129,18 +140,22 @@ class Trainer:
                   f'Validation Loss: {val_loss:.4f}, Validation Error: {val_error:.4f}, '
                   f'Validation Secondary Error: {val_error_2:.4f}')
 
-            # save best model
-            if val_error < min_val_error:
-                min_val_error = val_error
-                torch.save(self.model.state_dict(), './weights/model.pth.tar')
+            # save checkpoint and best model
+            if val_error < self.min_val_error:
+                self.min_val_error = val_error
+                is_best = True
+                print(f'Best model obtained at the end of epoch {epoch}')
+            else:
+                is_best = False
+            self.model_checkpoint.save(is_best, self.min_val_error, epoch, self.model, self.optimizer)
 
             # write logs
-            self.writer.add_scalar(f'{self.config.loss_fn}/train', train_loss, (epoch + 1) * i)
-            self.writer.add_scalar(f'{self.config.loss_fn}/val', val_loss, (epoch + 1) * i)
-            self.writer.add_scalar(f'{self.config.metric}/train', train_error, (epoch + 1) * i)
-            self.writer.add_scalar(f'{self.config.metric}/val', val_error, (epoch + 1) * i)
-            self.writer.add_scalar(f'{self.config.secondary_metric}/train', train_error_2, (epoch + 1) * i)
-            self.writer.add_scalar(f'{self.config.secondary_metric}/val', val_error_2, (epoch + 1) * i)
+            self.writer.add_scalar(f'{self.config.loss_fn}/train', train_loss, epoch * i)
+            self.writer.add_scalar(f'{self.config.loss_fn}/val', val_loss, epoch * i)
+            self.writer.add_scalar(f'{self.config.metric}/train', train_error, epoch * i)
+            self.writer.add_scalar(f'{self.config.metric}/val', val_error, epoch * i)
+            self.writer.add_scalar(f'{self.config.secondary_metric}/train', train_error_2, epoch * i)
+            self.writer.add_scalar(f'{self.config.secondary_metric}/val', val_error_2, epoch * i)
 
         self.writer.close()
 
