@@ -1,6 +1,5 @@
 # TODO: Add callbacks:
 #  1. EarlyStopping
-#  2. ReduceLROnPlateau
 
 import torch
 from torch.utils.tensorboard import SummaryWriter
@@ -35,9 +34,11 @@ class Trainer:
         self.model = create_model(self.config)
         print(self.model, end='\n\n')
 
-        # Loss and Optimizer
+        # Loss, Optimizer and LRScheduler
         self.criterion = getattr(loss_functions, config.loss_fn)()
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.config.learning_rate)
+        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, factor=0.5,
+                                                                    patience=5, verbose=True)
         self.loss_agg = np.sum if config.loss_fn[:6] == 'WRMSSE' else np.mean
 
         # Metric
@@ -60,8 +61,8 @@ class Trainer:
         # Load checkpoint if training is to be resumed
         self.model_checkpoint = ModelCheckpoint()
         if config.resume_training:
-            self.model, self.optimizer, _, self.start_epoch, self.min_val_error = self.model_checkpoint.load(
-                self.model, self.optimizer)
+            self.model, self.optimizer, self.scheduler, self.start_epoch, self.min_val_error = \
+                self.model_checkpoint.load(self.model, self.optimizer, self.scheduler)
             print(f'Resuming model training from epoch {self.start_epoch}')
         else:
             # remove previous logs, if any
@@ -140,6 +141,9 @@ class Trainer:
                   f'Validation Loss: {val_loss:.4f}, Validation Error: {val_error:.4f}, '
                   f'Validation Secondary Error: {val_error_2:.4f}')
 
+            # Change learning rate according to scheduler
+            self.scheduler.step(val_error)
+
             # save checkpoint and best model
             if val_error < self.min_val_error:
                 self.min_val_error = val_error
@@ -147,7 +151,7 @@ class Trainer:
                 print(f'Best model obtained at the end of epoch {epoch}')
             else:
                 is_best = False
-            self.model_checkpoint.save(is_best, self.min_val_error, epoch, self.model, self.optimizer)
+            self.model_checkpoint.save(is_best, self.min_val_error, epoch, self.model, self.optimizer, self.scheduler)
 
             # write logs
             self.writer.add_scalar(f'{self.config.loss_fn}/train', train_loss, epoch * i)
