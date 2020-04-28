@@ -23,7 +23,7 @@ class SubmissionGenerator:
         self.model = create_model(self.config)
         print(self.model)
         model_checkpoint = ModelCheckpoint()
-        self.model, _, _, _, _ = model_checkpoint.load(self.model, load_best=True)
+        self.model, _, _, _ = model_checkpoint.load(self.model, load_best=True)
 
         print(f' Loading data '.center(self.terminal_width, '*'))
         data_loader = DataLoader(self.config)

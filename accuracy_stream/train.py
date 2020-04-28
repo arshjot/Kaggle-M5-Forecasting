@@ -1,6 +1,3 @@
-# TODO: Add callbacks:
-#  1. EarlyStopping
-
 import torch
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
@@ -11,7 +8,7 @@ import os
 
 from data_loader.data_generator import DataLoader
 from utils.data_utils import *
-from utils.training_utils import ModelCheckpoint
+from utils.training_utils import ModelCheckpoint, EarlyStopping
 from losses_and_metrics import loss_functions, metrics
 from config import Config
 
@@ -39,6 +36,7 @@ class Trainer:
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.config.learning_rate)
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, factor=0.5,
                                                                     patience=5, verbose=True)
+        self.early_stopping = EarlyStopping(patience=12)
         self.loss_agg = np.sum if config.loss_fn[:6] == 'WRMSSE' else np.mean
 
         # Metric
@@ -57,12 +55,14 @@ class Trainer:
             self.config.validation_ts['data_start_t'], self.config.validation_ts['horizon_start_t'],
             self.config.validation_ts['horizon_end_t'])
 
-        self.start_epoch, self.min_val_error = 1, 100
+        self.start_epoch, self.min_val_error = 1, None
         # Load checkpoint if training is to be resumed
         self.model_checkpoint = ModelCheckpoint()
         if config.resume_training:
-            self.model, self.optimizer, self.scheduler, self.start_epoch, self.min_val_error = \
+            self.model, self.optimizer, self.scheduler, [self.start_epoch, self.min_val_error, num_bad_epochs] = \
                 self.model_checkpoint.load(self.model, self.optimizer, self.scheduler)
+            self.early_stopping.best = self.min_val_error
+            self.early_stopping.num_bad_epochs = num_bad_epochs
             print(f'Resuming model training from epoch {self.start_epoch}')
         else:
             # remove previous logs, if any
@@ -145,13 +145,19 @@ class Trainer:
             self.scheduler.step(val_error)
 
             # save checkpoint and best model
-            if val_error < self.min_val_error:
+            if self.min_val_error is None:
                 self.min_val_error = val_error
                 is_best = True
                 print(f'Best model obtained at the end of epoch {epoch}')
             else:
-                is_best = False
-            self.model_checkpoint.save(is_best, self.min_val_error, epoch, self.model, self.optimizer, self.scheduler)
+                if val_error < self.min_val_error:
+                    self.min_val_error = val_error
+                    is_best = True
+                    print(f'Best model obtained at the end of epoch {epoch}')
+                else:
+                    is_best = False
+            self.model_checkpoint.save(is_best, self.min_val_error, self.early_stopping.num_bad_epochs,
+                                       epoch, self.model, self.optimizer, self.scheduler)
 
             # write logs
             self.writer.add_scalar(f'{self.config.loss_fn}/train', train_loss, epoch * i)
@@ -160,6 +166,12 @@ class Trainer:
             self.writer.add_scalar(f'{self.config.metric}/val', val_error, epoch * i)
             self.writer.add_scalar(f'{self.config.secondary_metric}/train', train_error_2, epoch * i)
             self.writer.add_scalar(f'{self.config.secondary_metric}/val', val_error_2, epoch * i)
+
+            # Early Stopping
+            if self.early_stopping.step(val_error):
+                print(f' Training Stopped'.center(self.terminal_width, '*'))
+                print(f'Early stopping triggered after epoch {epoch}')
+                break
 
         self.writer.close()
 
