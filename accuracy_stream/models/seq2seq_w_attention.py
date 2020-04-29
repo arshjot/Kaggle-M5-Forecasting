@@ -57,7 +57,7 @@ class AttnDecoder(nn.Module):
         output = torch.cat((x_rnn[0], attn_applied[:, 0, :]), 1)
         output = self.attn_combine(output).unsqueeze(0)
 
-        output = F.relu(output)
+        # output = F.relu(output)
         output, hidden = self.rnn(output, hidden)
         output = self.pred(output[0])
 
