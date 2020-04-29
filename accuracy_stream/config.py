@@ -8,16 +8,16 @@ class Config:
     loss_fn = 'WRMSSELevel12Loss'
     metric = 'WRMSSEMetric'
     secondary_metric = 'RMSSELoss'
-    architecture = 'seq2seq'
+    architecture = 'seq2seq_w_attention'
 
     # hidden dimension and no. of layers will be the same for both encoder and decoder
     rnn_num_hidden = 256
     rnn_num_layers = 2
     bidirectional = True
-    enc_rnn_dropout = 0.0
-    dec_rnn_dropout = 0.0
+    enc_rnn_dropout = 0.1
+    dec_rnn_dropout = 0.1
 
-    num_epochs = 20
+    num_epochs = 200
     batch_size = 64
     learning_rate = 0.001
 
