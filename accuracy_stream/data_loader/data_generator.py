@@ -186,8 +186,8 @@ class DataLoader:
         # Get aggregated series
         agg_series_Y, agg_series_id = get_aggregated_series(self.Y[:, data_start_t:horizon_end_t],
                                                             *[self.ids[:, i] for i in range(0, 5)])
-        agg_target = agg_series_Y[:, horizon_start_t:]
-        agg_series_Y = agg_series_Y[:, data_start_t:horizon_start_t]
+        agg_target = agg_series_Y[:, horizon_start_t - data_start_t:]
+        agg_series_Y = agg_series_Y[:, :horizon_start_t - data_start_t]
         agg_series_prev_day_sales, _ = get_aggregated_series(self.X_prev_day_sales.T[:, data_start_t:horizon_start_t],
                                                              *[self.ids[:, i] for i in range(0, 5)])
 
