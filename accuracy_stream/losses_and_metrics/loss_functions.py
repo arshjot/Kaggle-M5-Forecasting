@@ -45,3 +45,13 @@ class WRMSSELevel12Loss(nn.Module):
             weight * torch.sqrt(self.mse(yhat, y).mean(1) / scale))
         return loss
 
+
+class WRMSSELoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.mse = nn.MSELoss(reduction='none')
+
+    def forward(self, yhat, y, scale, weight):
+        loss = (1/12) * torch.sum(
+            weight * torch.sqrt(self.mse(yhat, y).mean(1) / scale))
+        return loss

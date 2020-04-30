@@ -5,10 +5,10 @@ class Config:
 
     resume_training = False
 
-    loss_fn = 'WRMSSELevel12Loss'
+    loss_fn = 'WRMSSELoss'
     metric = 'WRMSSEMetric'
     secondary_metric = 'RMSSELoss'
-    architecture = 'seq2seq_w_attention'
+    architecture = 'seq2seq'
 
     # hidden dimension and no. of layers will be the same for both encoder and decoder
     rnn_num_hidden = 256

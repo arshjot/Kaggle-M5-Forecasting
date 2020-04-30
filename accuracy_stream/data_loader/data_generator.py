@@ -39,7 +39,7 @@ class CustomDataset(data_utils.Dataset):
     """
 
     def __init__(self, X_prev_day_sales, X_enc_only_feats, X_enc_dec_feats, X_calendar, X_last_day_sales,
-                 Y=None, rmsse_denominator=None, wrmsse_weights=None):
+                 Y=None, rmsse_denominator=None, wrmsse_weights=None, affected_ids=None):
 
         self.X_prev_day_sales = X_prev_day_sales
         self.X_enc_only_feats = X_enc_only_feats
@@ -51,6 +51,7 @@ class CustomDataset(data_utils.Dataset):
             self.Y = torch.from_numpy(Y).float()
             self.rmsse_denominator = torch.from_numpy(rmsse_denominator).float()
             self.wrmsse_weights = torch.from_numpy(wrmsse_weights).float()
+            self.affected_ids = torch.from_numpy(affected_ids).long()
         else:
             self.Y = None
 
@@ -89,7 +90,8 @@ class CustomDataset(data_utils.Dataset):
                 torch.from_numpy(x_last_day_sales).float()],
                 self.Y[idx, :],
                 idx,
-                [self.rmsse_denominator[idx], self.wrmsse_weights[idx]]]
+                [self.rmsse_denominator[idx], self.wrmsse_weights[idx]],
+                self.affected_ids[idx]]
 
 
 class DataLoader:
@@ -107,6 +109,12 @@ class DataLoader:
         self.X_calendar = data_dict['X_calendar']
         self.enc_dec_feat_names = data_dict['enc_dec_feat_names']
         self.Y = data_dict['Y']
+
+        # Get all affected series on sales update of each level 12 series (required for WRMSSELoss)
+        # Also, initialize predictions for WRMSSELoss calculation by replicating last month sales
+        self.train_prev_preds, _, self.affected_series_ids = get_aggregated_series(
+            self.Y[:, self.config.training_ts['horizon_start_t'] - 28:self.config.training_ts['horizon_start_t']],
+            self.ids)
 
     def create_train_loader(self, data_start_t=None, horizon_start_t=None, horizon_end_t=None):
         if (data_start_t is None) | (horizon_start_t is None) | (horizon_end_t is None):
@@ -134,7 +142,8 @@ class DataLoader:
                                 self.X_enc_dec_feats[data_start_t:horizon_end_t],
                                 self.X_calendar[data_start_t:horizon_end_t], self.X_prev_day_sales[horizon_start_t],
                                 Y=self.Y[:, horizon_start_t:horizon_end_t],
-                                rmsse_denominator=np.array(rmsse_den), wrmsse_weights=weights)
+                                rmsse_denominator=np.array(rmsse_den), wrmsse_weights=weights,
+                                affected_ids=self.affected_series_ids)
 
         return torch.utils.data.DataLoader(dataset=dataset, batch_size=self.config.batch_size, shuffle=True,
                                            num_workers=3, pin_memory=True)
@@ -165,7 +174,8 @@ class DataLoader:
                                 self.X_enc_dec_feats[data_start_t:horizon_end_t],
                                 self.X_calendar[data_start_t:horizon_end_t], self.X_prev_day_sales[horizon_start_t],
                                 Y=self.Y[:, horizon_start_t:horizon_end_t],
-                                rmsse_denominator=np.array(rmsse_den), wrmsse_weights=weights)
+                                rmsse_denominator=np.array(rmsse_den), wrmsse_weights=weights,
+                                affected_ids=self.affected_series_ids)
 
         return torch.utils.data.DataLoader(dataset=dataset, batch_size=self.config.batch_size, num_workers=3,
                                            pin_memory=True)

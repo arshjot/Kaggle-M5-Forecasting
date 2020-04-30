@@ -37,7 +37,7 @@ class Trainer:
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, factor=0.5,
                                                                     patience=5, verbose=True)
         self.early_stopping = EarlyStopping(patience=12)
-        self.loss_agg = np.sum if config.loss_fn[:6] == 'WRMSSE' else np.mean
+        self.loss_agg = np.sum if config.loss_fn == 'WRMSSELevel12Loss' else np.mean
 
         # Metric
         self.metric = getattr(metrics, config.metric)()
@@ -54,6 +54,14 @@ class Trainer:
         self.val_metric_t, self.val_metric_w, self.val_metric_s = data_loader.get_weights_and_scaling(
             self.config.validation_ts['data_start_t'], self.config.validation_ts['horizon_start_t'],
             self.config.validation_ts['horizon_end_t'])
+
+        if self.config.loss_fn == 'WRMSSELoss':
+            self.train_loss_t, self.train_loss_w, self.train_loss_s = [torch.from_numpy(i).to(self.config.device)
+                                                                       for i in [self.train_metric_t,
+                                                                                 self.train_metric_w,
+                                                                                 self.train_metric_s]]
+            # initialize predictions for WRMSSELoss calculation by replicating last month sales
+            self.train_prev_preds = torch.from_numpy(data_loader.train_prev_preds).to(self.config.device)
 
         self.start_epoch, self.min_val_error = 1, None
         # Load checkpoint if training is to be resumed
@@ -78,7 +86,7 @@ class Trainer:
         progbar = tqdm(self.val_loader)
         progbar.set_description("             ")
         losses, sec_metric, epoch_preds, epoch_ids, epoch_ids_idx = [], [], [], [], []
-        for i, [x, y, ids_idx, loss_input] in enumerate(progbar):
+        for i, [x, y, ids_idx, loss_input, _] in enumerate(progbar):
             x = [inp.to(self.config.device) for inp in x]
             y = y.to(self.config.device)
             loss_input = [inp.to(self.config.device) for inp in loss_input]
@@ -102,26 +110,38 @@ class Trainer:
 
     def train(self):
         print(f' Training '.center(self.terminal_width, '*'), end='\n\n')
+
         for epoch in range(self.start_epoch, self.config.num_epochs+1):
             print(f' Epoch [{epoch}/{self.config.num_epochs}] '.center(self.terminal_width, 'x'))
             self.model.train()
             progbar = tqdm(self.train_loader)
             losses, sec_metric, epoch_preds, epoch_ids, epoch_ids_idx = [], [], [], [], []
-            for i, [x, y, ids_idx, loss_input] in enumerate(progbar):
+
+            for i, [x, y, ids_idx, loss_input, affected_ids] in enumerate(progbar):
                 x = [inp.to(self.config.device) for inp in x]
                 y = y.to(self.config.device)
                 loss_input = [inp.to(self.config.device) for inp in loss_input]
+                affected_ids = affected_ids.to(self.config.device)
+
                 epoch_ids.append(self.ids[ids_idx])
                 epoch_ids_idx.append(ids_idx.numpy())
                 # Forward + Backward + Optimize
                 self.optimizer.zero_grad()
                 preds = self.model(*x)
                 epoch_preds.append(preds.data.cpu().numpy())
-                loss = self.criterion(preds, y, *loss_input)
-                losses.append(loss.data.cpu().numpy())
                 sec_metric.append(self.metric_2(preds, y, *loss_input).data.cpu().numpy())
 
-                if self.config.loss_fn[:6] == 'WRMSSE':
+                # If WRMSSELoss is used, update the previously stored predictions according to the affected_ids
+                # Also use weights, scales and labels for all 42,840 series
+                if self.config.loss_fn == 'WRMSSELoss':
+                    preds = update_preds_acc_hierarchy(self.train_prev_preds, preds, affected_ids)
+                    y, loss_input = self.train_loss_t, [self.train_loss_s, self.train_loss_w]
+                    self.train_prev_preds = preds.detach()
+
+                loss = self.criterion(preds, y, *loss_input)
+                losses.append(loss.data.cpu().numpy())
+
+                if self.config.loss_fn == 'WRMSSELevel12Loss':
                     progbar.set_description("loss = %0.3f " % np.round(
                         (len(self.train_loader) / (i+1)) * self.loss_agg(losses), 3))
                 else:
@@ -142,6 +162,10 @@ class Trainer:
             train_error_2 = np.mean(sec_metric)
 
             val_loss, val_error, val_error_2 = self._get_val_loss_and_err()
+
+            if (self.config.loss_fn == 'WRMSSELoss') & (self.config.metric == 'WRMSSEMetric'):
+                val_loss = val_error
+
             print(f'Training Loss: {train_loss:.4f}, Training Error: {train_error:.4f}, '
                   f'Training Secondary Error: {train_error_2:.4f}\n'
                   f'Validation Loss: {val_loss:.4f}, Validation Error: {val_error:.4f}, '

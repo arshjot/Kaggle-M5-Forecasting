@@ -210,3 +210,19 @@ def get_weights_level_12(sales, sell_price):
     weights = dollar_sales / dollar_sales.sum()
 
     return weights
+
+
+def update_preds_acc_hierarchy(prev_preds, preds, affected_ids):
+    """
+    prev_preds: Previously stored predictions for all 42,840 series (42840, n_timesteps)
+    preds: Current batch predictions (batch_size, n_timesteps)
+    affected_ids: the ids of all the series affected by the series in preds (30490, 12)
+    """
+
+    # get the change in predictions for the batch series
+    change_preds = (preds - prev_preds[affected_ids[:, -1]]).repeat_interleave(12, dim=0)
+
+    affected_ids = affected_ids.flatten()
+    prev_preds = prev_preds.index_add(0, affected_ids, change_preds)
+
+    return prev_preds
