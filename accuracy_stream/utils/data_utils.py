@@ -1,105 +1,167 @@
 import numpy as np
-from itertools import product
+import pandas as pd
 
 
-def get_aggregated_series(sales, item_id, dept_id, cat_id, store_id, state_id):
+def get_aggregated_series(sales, sales_data_ids):
     """
     Aggregates 30,490 level 12 series to generate data for all 42,840 series
 
     Input data format:
     sales: np array of shape (30490, num_timesteps)
-    all id arguments: np arrays of shape (30490,)
+    sales_data_ids: np array of shape (30490, 5)
+                    with 'item_id', 'dept_id', 'cat_id', 'store_id', 'state_id' as the columns
     """
 
-    aggregated_series, aggregated_series_id = np.empty((42840, sales.shape[1])), np.empty(42840, '<U28')
+    df = pd.DataFrame({col: sales_data_ids[:, i] for col, i in
+                       zip(['item_id', 'dept_id', 'cat_id', 'store_id', 'state_id'], range(0, 5))})
+    df = pd.concat([df, pd.DataFrame(sales)], axis=1)
+    data_cols = [i for i in range(0, sales.shape[1])]
+
+    agg_indices, agg_series, agg_series_id = [], [], []
 
     # Level 1
-    aggregated_series[0] = sales.sum(0)
-    aggregated_series_id[0] = 'Level1_Total_X'
-    fill_id = 1
+    agg_series.append(sales.sum(0).reshape(1, -1))
+    agg_series_id.append(np.array(['Level1_Total_X']))
 
     # Level 2
-    for agg_element in np.unique(state_id):
-        agg_sales = sales[np.where(state_id == agg_element)[0]].sum(0)[np.newaxis, :]
-        aggregated_series[fill_id] = agg_sales
-        aggregated_series_id[fill_id] = f'Level2_{agg_element}_X'
-        fill_id += 1
+    agg = df.groupby(['state_id'])[data_cols]
+    agg_indices.append(agg.indices)
+    agg = agg.sum()
+    agg_series.append(agg.values)
+    agg_series_id.append(('Level2_' + agg.index.values + '_X'))
 
     # Level 3
-    for agg_element in np.unique(store_id):
-        agg_sales = sales[np.where(store_id == agg_element)[0]].sum(0)[np.newaxis, :]
-        aggregated_series[fill_id] = agg_sales
-        aggregated_series_id[fill_id] = f'Level3_{agg_element}_X'
-        fill_id += 1
+    agg = df.groupby(['store_id'])[data_cols]
+    agg_indices.append(agg.indices)
+    agg = agg.sum()
+    agg_series.append(agg.values)
+    agg_series_id.append(('Level3_' + agg.index.values + '_X'))
 
     # Level 4
-    for agg_element in np.unique(cat_id):
-        agg_sales = sales[np.where(cat_id == agg_element)[0]].sum(0)[np.newaxis, :]
-        aggregated_series[fill_id] = agg_sales
-        aggregated_series_id[fill_id] = f'Level4_{agg_element}_X'
-        fill_id += 1
+    agg = df.groupby(['cat_id'])[data_cols]
+    agg_indices.append(agg.indices)
+    agg = agg.sum()
+    agg_series.append(agg.values)
+    agg_series_id.append(('Level4_' + agg.index.values + '_X'))
 
     # Level 5
-    for agg_element in np.unique(dept_id):
-        agg_sales = sales[np.where(dept_id == agg_element)[0]].sum(0)[np.newaxis, :]
-        aggregated_series[fill_id] = agg_sales
-        aggregated_series_id[fill_id] = f'Level5_{agg_element}_X'
-        fill_id += 1
+    agg = df.groupby(['dept_id'])[data_cols]
+    agg_indices.append(agg.indices)
+    agg = agg.sum()
+    agg_series.append(agg.values)
+    agg_series_id.append(('Level5_' + agg.index.values + '_X'))
 
     # Level 6
-    for agg_1, agg_2 in product(np.unique(state_id), np.unique(cat_id)):
-        agg_sales = sales[np.where((state_id == agg_1) & (cat_id == agg_2))[0]].sum(0)[np.newaxis, :]
-        aggregated_series[fill_id] = agg_sales
-        aggregated_series_id[fill_id] = f'Level6_{agg_1}_{agg_2}'
-        fill_id += 1
+    agg = df.groupby(['state_id', 'cat_id'])[data_cols]
+    agg_indices.append(agg.indices)
+    agg = agg.sum()
+    agg_series.append(agg.values)
+    agg_series_id.append('Level6_' + agg.index.get_level_values(0) + '_' + agg.index.get_level_values(1))
 
     # Level 7
-    for agg_1, agg_2 in product(np.unique(state_id), np.unique(dept_id)):
-        agg_sales = sales[np.where((state_id == agg_1) & (dept_id == agg_2))[0]].sum(0)[np.newaxis, :]
-        aggregated_series[fill_id] = agg_sales
-        aggregated_series_id[fill_id] = f'Level7_{agg_1}_{agg_2}'
-        fill_id += 1
+    agg = df.groupby(['state_id', 'dept_id'])[data_cols]
+    agg_indices.append(agg.indices)
+    agg = agg.sum()
+    agg_series.append(agg.values)
+    agg_series_id.append('Level7_' + agg.index.get_level_values(0) + '_' + agg.index.get_level_values(1))
 
     # Level 8
-    for agg_1, agg_2 in product(np.unique(store_id), np.unique(cat_id)):
-        agg_sales = sales[np.where((store_id == agg_1) & (cat_id == agg_2))[0]].sum(0)[np.newaxis, :]
-        aggregated_series[fill_id] = agg_sales
-        aggregated_series_id[fill_id] = f'Level8_{agg_1}_{agg_2}'
-        fill_id += 1
+    agg = df.groupby(['store_id', 'cat_id'])[data_cols]
+    agg_indices.append(agg.indices)
+    agg = agg.sum()
+    agg_series.append(agg.values)
+    agg_series_id.append('Level8_' + agg.index.get_level_values(0) + '_' + agg.index.get_level_values(1))
 
     # Level 9
-    for agg_1, agg_2 in product(np.unique(store_id), np.unique(dept_id)):
-        agg_sales = sales[np.where((store_id == agg_1) & (dept_id == agg_2))[0]].sum(0)[np.newaxis, :]
-        aggregated_series[fill_id] = agg_sales
-        aggregated_series_id[fill_id] = f'Level9_{agg_1}_{agg_2}'
-        fill_id += 1
+    agg = df.groupby(['store_id', 'dept_id'])[data_cols]
+    agg_indices.append(agg.indices)
+    agg = agg.sum()
+    agg_series.append(agg.values)
+    agg_series_id.append('Level9_' + agg.index.get_level_values(0) + '_' + agg.index.get_level_values(1))
 
     # Level 10
-    for agg_element in np.unique(item_id):
-        agg_sales = sales[np.where(item_id == agg_element)[0]].sum(0)[np.newaxis, :]
-        aggregated_series[fill_id] = agg_sales
-        aggregated_series_id[fill_id] = f'Level10_{agg_element}_X'
-        fill_id += 1
+    agg = df.groupby(['item_id'])[data_cols]
+    agg_indices.append(agg.indices)
+    agg = agg.sum()
+    agg_series.append(agg.values)
+    agg_series_id.append(('Level10_' + agg.index.values + '_X'))
 
     # Level 11
-    for agg_1, agg_2 in product(np.unique(state_id), np.unique(item_id)):
-        agg_sales = sales[np.where((state_id == agg_1) & (item_id == agg_2))[0]].sum(0)[np.newaxis, :]
-        aggregated_series[fill_id] = agg_sales
-        aggregated_series_id[fill_id] = f'Level11_{agg_1}_{agg_2}'
-        fill_id += 1
+    agg = df.groupby(['state_id', 'item_id'])[data_cols]
+    agg_indices.append(agg.indices)
+    agg = agg.sum()
+    agg_series.append(agg.values)
+    agg_series_id.append('Level11_' + agg.index.get_level_values(0) + '_' + agg.index.get_level_values(1))
 
     # Level 12
-    aggregated_series[fill_id:] = sales
-    aggregated_series_id[fill_id:] = np.array([f'Level12_{item}_{store}'
-                                               for item, store in zip(item_id, store_id)])
+    agg = df.set_index(['item_id', 'store_id'])[data_cols]
+    agg_series.append(agg.values)
+    agg_series_id.append('Level12_' + agg.index.get_level_values(0) + '_' + agg.index.get_level_values(1))
 
-    # Return the arrays sorted acc to ids
-    sort_idx = aggregated_series_id.argsort()
+    # Get affected_hierarchy_ids - all the series affected on updating each Level 12 series
+    affected_hierarchy_ids = np.empty((30490, 12), np.int32)
 
-    return aggregated_series[sort_idx], aggregated_series_id[sort_idx]
+    # Level 1
+    affected_hierarchy_ids[:, 0] = 0
+    fill_id, fill_col = 1, 1
+    # Level 2
+    for k, v in agg_indices[0].items():
+        affected_hierarchy_ids[v, fill_col] = fill_id
+        fill_id += 1
+    fill_col += 1
+    # Level 3
+    for k, v in agg_indices[1].items():
+        affected_hierarchy_ids[v, fill_col] = fill_id
+        fill_id += 1
+    fill_col += 1
+    # Level 4
+    for k, v in agg_indices[2].items():
+        affected_hierarchy_ids[v, fill_col] = fill_id
+        fill_id += 1
+    fill_col += 1
+    # Level 5
+    for k, v in agg_indices[3].items():
+        affected_hierarchy_ids[v, fill_col] = fill_id
+        fill_id += 1
+    fill_col += 1
+    # Level 6
+    for k, v in agg_indices[4].items():
+        affected_hierarchy_ids[v, fill_col] = fill_id
+        fill_id += 1
+    fill_col += 1
+    # Level 7
+    for k, v in agg_indices[5].items():
+        affected_hierarchy_ids[v, fill_col] = fill_id
+        fill_id += 1
+    fill_col += 1
+    # Level 8
+    for k, v in agg_indices[6].items():
+        affected_hierarchy_ids[v, fill_col] = fill_id
+        fill_id += 1
+    fill_col += 1
+    # Level 9
+    for k, v in agg_indices[7].items():
+        affected_hierarchy_ids[v, fill_col] = fill_id
+        fill_id += 1
+    fill_col += 1
+    # Level 10
+    for k, v in agg_indices[8].items():
+        affected_hierarchy_ids[v, fill_col] = fill_id
+        fill_id += 1
+    fill_col += 1
+    # Level 11
+    for k, v in agg_indices[9].items():
+        affected_hierarchy_ids[v, fill_col] = fill_id
+        fill_id += 1
+    fill_col += 1
+    # Level 12
+    affected_hierarchy_ids[:, fill_col] = fill_id + np.arange(0, 30490)
+
+    return np.concatenate(agg_series, axis=0), np.concatenate(agg_series_id, axis=0).\
+        astype('<U28'), affected_hierarchy_ids
 
 
-def get_weights_all_levels(sales, sell_price, item_id, dept_id, cat_id, store_id, state_id):
+def get_weights_all_levels(sales, sell_price, sales_data_ids):
     """
     Generates weights for all 42,840 series
 
@@ -107,7 +169,8 @@ def get_weights_all_levels(sales, sell_price, item_id, dept_id, cat_id, store_id
     sales: np array of shape (30490, 28)
     sell_price: np array of shape (30490, 28)
 
-    all id arguments: np arrays of shape (30490,)
+    sales_data_ids: np array of shape (30490, 5)
+                with 'item_id', 'dept_id', 'cat_id', 'store_id', 'state_id' as the columns
     """
 
     assert (sales.shape == sell_price.shape), "Sell price and Sales arrays have different sizes"
@@ -115,7 +178,7 @@ def get_weights_all_levels(sales, sell_price, item_id, dept_id, cat_id, store_id
 
     # Get actual dollar sales for last 28 days for all 42,840 series
     dollar_sales = sales * sell_price
-    agg_series, agg_series_id = get_aggregated_series(dollar_sales, item_id, dept_id, cat_id, store_id, state_id)
+    agg_series, agg_series_id, _ = get_aggregated_series(dollar_sales, sales_data_ids)
 
     # Sum up the actual dollar sales for all 28 timesteps
     agg_series = agg_series.sum(1)

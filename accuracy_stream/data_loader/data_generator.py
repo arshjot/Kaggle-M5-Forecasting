@@ -120,7 +120,9 @@ class DataLoader:
         actively_sold_in_range = (self.X_prev_day_sales[data_start_t:horizon_start_t] != 0).argmax(axis=0)
         rmsse_den = []
         for idx, first_active_sell_idx in enumerate(actively_sold_in_range):
-            rmsse_den.append(squared_movement[first_active_sell_idx:, idx].mean())
+            den = squared_movement[first_active_sell_idx:, idx].mean()
+            den = den if den != 0 else 1
+            rmsse_den.append(den)
 
         # Get level 12 weights for WRMSSE loss (level 12)
         sell_price_i = self.enc_dec_feat_names.index('sell_price')
@@ -149,7 +151,9 @@ class DataLoader:
         actively_sold_in_range = (self.X_prev_day_sales[data_start_t:horizon_start_t] != 0).argmax(axis=0)
         rmsse_den = []
         for idx, first_active_sell_idx in enumerate(actively_sold_in_range):
-            rmsse_den.append(squared_movement[first_active_sell_idx:, idx].mean())
+            den = squared_movement[first_active_sell_idx:, idx].mean()
+            den = den if den != 0 else 1
+            rmsse_den.append(den)
 
         # Get level 12 weights for WRMSSE loss (level 12)
         sell_price_i = self.enc_dec_feat_names.index('sell_price')
@@ -184,25 +188,26 @@ class DataLoader:
         """Returns aggregated target, weights and rmsse scaling factors for series of all 12 levels"""
 
         # Get aggregated series
-        agg_series_Y, agg_series_id = get_aggregated_series(self.Y[:, data_start_t:horizon_end_t],
-                                                            *[self.ids[:, i] for i in range(0, 5)])
+        agg_series_Y, agg_series_id, _ = get_aggregated_series(self.Y[:, data_start_t:horizon_end_t], self.ids)
         agg_target = agg_series_Y[:, horizon_start_t - data_start_t:]
         agg_series_Y = agg_series_Y[:, :horizon_start_t - data_start_t]
-        agg_series_prev_day_sales, _ = get_aggregated_series(self.X_prev_day_sales.T[:, data_start_t:horizon_start_t],
-                                                             *[self.ids[:, i] for i in range(0, 5)])
+        agg_series_prev_day_sales, _, _ = get_aggregated_series(
+            self.X_prev_day_sales.T[:, data_start_t:horizon_start_t], self.ids)
 
         # calculate denominator for rmsse loss
         squared_movement = ((agg_series_Y.T - agg_series_prev_day_sales.T).astype(np.int64) ** 2)
         actively_sold_in_range = (agg_series_prev_day_sales.T != 0).argmax(axis=0)
         rmsse_den = []
         for idx, first_active_sell_idx in enumerate(actively_sold_in_range):
-            rmsse_den.append(squared_movement[first_active_sell_idx:, idx].mean())
+            den = squared_movement[first_active_sell_idx:, idx].mean()
+            den = den if den != 0 else 1
+            rmsse_den.append(den)
 
         # Get weights
         sell_price_i = self.enc_dec_feat_names.index('sell_price')
         weights, _ = get_weights_all_levels(self.Y[:, horizon_start_t-28:horizon_start_t],
                                             self.X_enc_dec_feats[horizon_start_t-28:horizon_start_t, :, sell_price_i].T,
-                                            *[self.ids[:, i] for i in range(0, 5)])
+                                            self.ids)
 
         return agg_target, weights, np.array(rmsse_den)
 

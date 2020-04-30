@@ -77,12 +77,13 @@ class Trainer:
         self.model.eval()
         progbar = tqdm(self.val_loader)
         progbar.set_description("             ")
-        losses, sec_metric, epoch_preds, epoch_ids = [], [], [], []
+        losses, sec_metric, epoch_preds, epoch_ids, epoch_ids_idx = [], [], [], [], []
         for i, [x, y, ids_idx, loss_input] in enumerate(progbar):
             x = [inp.to(self.config.device) for inp in x]
             y = y.to(self.config.device)
             loss_input = [inp.to(self.config.device) for inp in loss_input]
             epoch_ids.append(self.ids[ids_idx])
+            epoch_ids_idx.append(ids_idx.numpy())
 
             preds = self.model(*x)
             epoch_preds.append(preds.data.cpu().numpy())
@@ -90,8 +91,11 @@ class Trainer:
             losses.append(loss.data.cpu().numpy())
             sec_metric.append(self.metric_2(preds, y, *loss_input).data.cpu().numpy())
 
-        validation_agg_preds, _ = get_aggregated_series(np.concatenate(epoch_preds, axis=0),
-                                                        *[np.concatenate(epoch_ids, axis=0)[:, i] for i in range(0, 5)])
+        # Sort to remove shuffle applied by the dataset loader
+        sort_idx = np.argsort(np.concatenate(epoch_ids_idx, axis=0))
+        epoch_preds = np.concatenate(epoch_preds, axis=0)[sort_idx]
+        epoch_ids = np.concatenate(epoch_ids, axis=0)[sort_idx]
+        validation_agg_preds, _, _ = get_aggregated_series(epoch_preds, epoch_ids)
         val_error = self.metric.get_error(validation_agg_preds, self.val_metric_t, self.val_metric_s, self.val_metric_w)
 
         return self.loss_agg(losses), val_error, np.mean(sec_metric)
@@ -102,13 +106,13 @@ class Trainer:
             print(f' Epoch [{epoch}/{self.config.num_epochs}] '.center(self.terminal_width, 'x'))
             self.model.train()
             progbar = tqdm(self.train_loader)
-            losses, sec_metric, epoch_preds, epoch_ids = [], [], [], []
+            losses, sec_metric, epoch_preds, epoch_ids, epoch_ids_idx = [], [], [], [], []
             for i, [x, y, ids_idx, loss_input] in enumerate(progbar):
                 x = [inp.to(self.config.device) for inp in x]
                 y = y.to(self.config.device)
                 loss_input = [inp.to(self.config.device) for inp in loss_input]
                 epoch_ids.append(self.ids[ids_idx])
-
+                epoch_ids_idx.append(ids_idx.numpy())
                 # Forward + Backward + Optimize
                 self.optimizer.zero_grad()
                 preds = self.model(*x)
@@ -127,9 +131,11 @@ class Trainer:
                 self.optimizer.step()
 
             # Get training and validation loss and error
-            training_agg_preds, _ = get_aggregated_series(np.concatenate(epoch_preds, axis=0),
-                                                          *[np.concatenate(epoch_ids, axis=0)[:, i]
-                                                            for i in range(0, 5)])
+            # Sort to remove shuffle applied by the dataset loader
+            sort_idx = np.argsort(np.concatenate(epoch_ids_idx, axis=0))
+            epoch_preds = np.concatenate(epoch_preds, axis=0)[sort_idx]
+            epoch_ids = np.concatenate(epoch_ids, axis=0)[sort_idx]
+            training_agg_preds, _, _ = get_aggregated_series(epoch_preds, epoch_ids)
             train_loss = self.loss_agg(losses)
             train_error = self.metric.get_error(training_agg_preds, self.train_metric_t,
                                                 self.train_metric_s, self.train_metric_w)
