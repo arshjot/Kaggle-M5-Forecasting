@@ -30,7 +30,7 @@ class Config:
                    'horizon_end_t': 1969 - 1 - (28 * 3)}
     validation_ts = {'data_start_t': 1969 - 1 - (28*15), 'horizon_start_t': 1969 - 1 - (28 * 3),
                      'horizon_end_t': 1969 - 1 - (28 * 2)}
-    test_ts = {'data_start_t': 1969 - 1 - 1968 - (28*14), 'horizon_start_t': 1969 - 1 - (28 * 2),
+    test_ts = {'data_start_t': 1969 - 1 - (28*14), 'horizon_start_t': 1969 - 1 - (28 * 2),
                'horizon_end_t': 1969 - 1 - (28 * 1)}
 
     data_file = 'data/data.pickle'

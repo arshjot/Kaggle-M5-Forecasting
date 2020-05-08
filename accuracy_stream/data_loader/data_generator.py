@@ -68,12 +68,15 @@ class CustomDataset(data_utils.Dataset):
             scale = self.rmsse_denominator[idx - (self.window_id[idx] * 30490)]
             weight = self.wrmsse_weights[idx - (self.window_id[idx] * 30490)]
             ids_idx = idx - (self.window_id[idx] * 30490)
+            window_id = self.window_id[idx]
         else:
             X_calendar = self.X_calendar
-            affected_ids = self.affected_ids[idx]
-            scale = self.rmsse_denominator[idx]
-            weight = self.wrmsse_weights[idx]
-            ids_idx = idx
+            if self.Y is not None:
+                affected_ids = self.affected_ids[idx]
+                scale = self.rmsse_denominator[idx]
+                weight = self.wrmsse_weights[idx]
+                ids_idx = idx
+                window_id = 0
 
         enc_timesteps = self.X_prev_day_sales.shape[0]
         dec_timesteps = self.X_enc_dec_feats.shape[0] - enc_timesteps
@@ -114,7 +117,7 @@ class CustomDataset(data_utils.Dataset):
                 self.Y[idx, :], torch.from_numpy(np.array(self.norm_factor[idx])).float(),
                 ids_idx,
                 [scale, weight],
-                affected_ids]
+                affected_ids, window_id]
 
 
 class DataLoader:
@@ -306,5 +309,3 @@ class DataLoader:
                                             self.ids)
 
         return agg_target, weights, np.array(rmsse_den)
-
-

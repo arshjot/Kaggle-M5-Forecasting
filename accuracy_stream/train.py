@@ -87,7 +87,7 @@ class Trainer:
         progbar = tqdm(self.val_loader)
         progbar.set_description("             ")
         losses, sec_metric, epoch_preds, epoch_ids, epoch_ids_idx = [], [], [], [], []
-        for i, [x, y, norm_factor, ids_idx, loss_input, _] in enumerate(progbar):
+        for i, [x, y, norm_factor, ids_idx, loss_input, _, _] in enumerate(progbar):
             x = [inp.to(self.config.device) for inp in x]
             y = y.to(self.config.device)
             norm_factor = norm_factor.to(self.config.device)
@@ -113,25 +113,33 @@ class Trainer:
     def train(self):
         print(f' Training '.center(self.terminal_width, '*'), end='\n\n')
 
-        for epoch in range(self.start_epoch, self.config.num_epochs+1):
+        for epoch in range(self.start_epoch, self.config.num_epochs + 1):
             print(f' Epoch [{epoch}/{self.config.num_epochs}] '.center(self.terminal_width, 'x'))
             self.model.train()
             progbar = tqdm(self.train_loader)
             losses, sec_metric, epoch_preds, epoch_ids, epoch_ids_idx = [], [], [], [], []
 
-            for i, [x, y, norm_factor, ids_idx, loss_input, affected_ids] in enumerate(progbar):
+            for i, [x, y, norm_factor, ids_idx, loss_input, affected_ids, window_id] in enumerate(progbar):
                 x = [inp.to(self.config.device) for inp in x]
                 y = y.to(self.config.device)
                 norm_factor = norm_factor.to(self.config.device)
                 loss_input = [inp.to(self.config.device) for inp in loss_input]
                 affected_ids = affected_ids.to(self.config.device)
 
-                epoch_ids.append(self.ids[ids_idx])
-                epoch_ids_idx.append(ids_idx.numpy())
                 # Forward + Backward + Optimize
                 self.optimizer.zero_grad()
                 preds = self.model(*x) * norm_factor.unsqueeze(1)
-                epoch_preds.append(preds.data.cpu().numpy())
+
+                if self.config.sliding_window:
+                    if torch.sum(window_id == self.n_windows - 1) > 0:
+                        epoch_ids.append(self.ids[ids_idx[window_id == self.n_windows - 1]].reshape(-1, 5))
+                        epoch_ids_idx.append(ids_idx[window_id == self.n_windows - 1].numpy())
+                        epoch_preds.append(preds[window_id == self.n_windows - 1].data.cpu().numpy().reshape(-1, 28))
+                else:
+                    epoch_ids.append(self.ids[ids_idx])
+                    epoch_ids_idx.append(ids_idx.numpy())
+                    epoch_preds.append(preds.data.cpu().numpy())
+
                 sec_metric.append(self.metric_2(preds, y, *loss_input).data.cpu().numpy())
 
                 # If WRMSSELoss is used, update the previously stored predictions according to the affected_ids
@@ -146,7 +154,7 @@ class Trainer:
 
                 if self.config.loss_fn == 'WRMSSELevel12Loss':
                     progbar.set_description("loss = %0.3f " % np.round(
-                        (len(self.train_loader) / (i+1)) * self.loss_agg(losses) / self.n_windows, 3))
+                        (len(self.train_loader) / (i + 1)) * self.loss_agg(losses) / self.n_windows, 3))
                 else:
                     progbar.set_description("loss = %0.3f " % np.round(self.loss_agg(losses), 3))
 
@@ -159,7 +167,10 @@ class Trainer:
             epoch_preds = np.concatenate(epoch_preds, axis=0)[sort_idx]
             epoch_ids = np.concatenate(epoch_ids, axis=0)[sort_idx]
             training_agg_preds, _, _ = get_aggregated_series(epoch_preds, epoch_ids)
-            train_loss = self.loss_agg(losses)
+            if self.config.loss_fn == 'WRMSSELevel12Loss':
+                train_loss = self.loss_agg(losses) / self.n_windows
+            else:
+                train_loss = self.loss_agg(losses)
             train_error = self.metric.get_error(training_agg_preds, self.train_metric_t,
                                                 self.train_metric_s, self.train_metric_w)
             train_error_2 = np.mean(sec_metric)
