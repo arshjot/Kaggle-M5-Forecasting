@@ -37,7 +37,8 @@ class AttnDecoder(nn.Module):
     def __init__(self, input_size, embedding_sizes, cal_embedding_sizes, output_size, config):
         super(AttnDecoder, self).__init__()
         self.input_size = input_size
-        self.max_length = config.training_ts['horizon_start_t'] - config.training_ts['data_start_t']
+        self.max_length = config.window_length if config.sliding_window \
+            else config.training_ts['horizon_start_t'] - config.training_ts['data_start_t']
 
         self.embeddings = nn.ModuleList([nn.Embedding(classes, hidden_size)
                                          for classes, hidden_size in embedding_sizes])
@@ -82,7 +83,8 @@ class Seq2Seq(nn.Module):
         self.encoder = encoder
         self.decoder = decoder
         self.config = config
-        self.max_length = config.training_ts['horizon_start_t'] - config.training_ts['data_start_t']
+        self.max_length = config.window_length if config.sliding_window \
+            else config.training_ts['horizon_start_t'] - config.training_ts['data_start_t']
 
     def forward(self, x_enc, x_enc_emb, x_cal_enc_emb, x_dec, x_dec_emb, x_cal_dec_emb, x_last_day_sales):
         batch_size, pred_len = x_dec.shape[0:2]

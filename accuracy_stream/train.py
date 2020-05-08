@@ -54,6 +54,7 @@ class Trainer:
         self.val_metric_t, self.val_metric_w, self.val_metric_s = data_loader.get_weights_and_scaling(
             self.config.validation_ts['data_start_t'], self.config.validation_ts['horizon_start_t'],
             self.config.validation_ts['horizon_end_t'])
+        self.n_windows = data_loader.n_windows
 
         if self.config.loss_fn == 'WRMSSELoss':
             self.train_loss_t, self.train_loss_w, self.train_loss_s = [torch.from_numpy(i).to(self.config.device)
@@ -145,7 +146,7 @@ class Trainer:
 
                 if self.config.loss_fn == 'WRMSSELevel12Loss':
                     progbar.set_description("loss = %0.3f " % np.round(
-                        (len(self.train_loader) / (i+1)) * self.loss_agg(losses), 3))
+                        (len(self.train_loader) / (i+1)) * self.loss_agg(losses) / self.n_windows, 3))
                 else:
                     progbar.set_description("loss = %0.3f " % np.round(self.loss_agg(losses), 3))
 

@@ -39,7 +39,8 @@ class CustomDataset(data_utils.Dataset):
     """
 
     def __init__(self, X_prev_day_sales, X_enc_only_feats, X_enc_dec_feats, X_calendar, X_last_day_sales,
-                 norm_factor, Y=None, rmsse_denominator=None, wrmsse_weights=None, affected_ids=None):
+                 norm_factor, Y=None, rmsse_denominator=None, wrmsse_weights=None, affected_ids=None,
+                 window_id=None):
 
         self.X_prev_day_sales = X_prev_day_sales
         self.X_enc_only_feats = X_enc_only_feats
@@ -47,6 +48,7 @@ class CustomDataset(data_utils.Dataset):
         self.X_calendar = X_calendar
         self.X_last_day_sales = X_last_day_sales
         self.norm_factor = norm_factor
+        self.window_id = window_id
 
         if Y is not None:
             self.Y = torch.from_numpy(Y).float()
@@ -60,6 +62,19 @@ class CustomDataset(data_utils.Dataset):
         return self.X_prev_day_sales.shape[1]
 
     def __getitem__(self, idx):
+        if self.window_id is not None:
+            X_calendar = self.X_calendar[self.window_id[idx]]
+            affected_ids = self.affected_ids[idx - (self.window_id[idx] * 30490)]
+            scale = self.rmsse_denominator[idx - (self.window_id[idx] * 30490)]
+            weight = self.wrmsse_weights[idx - (self.window_id[idx] * 30490)]
+            ids_idx = idx - (self.window_id[idx] * 30490)
+        else:
+            X_calendar = self.X_calendar
+            affected_ids = self.affected_ids[idx]
+            scale = self.rmsse_denominator[idx]
+            weight = self.wrmsse_weights[idx]
+            ids_idx = idx
+
         enc_timesteps = self.X_prev_day_sales.shape[0]
         dec_timesteps = self.X_enc_dec_feats.shape[0] - enc_timesteps
         num_embedding = 5
@@ -69,8 +84,8 @@ class CustomDataset(data_utils.Dataset):
         x_enc_dec_feats_enc = self.X_enc_dec_feats[:enc_timesteps, idx, :-num_embedding].reshape(enc_timesteps, -1)
         # x_enc_only_feats = self.X_enc_only_feats[:, idx, :].reshape(enc_timesteps, -1)
         x_prev_day_sales_enc = self.X_prev_day_sales[:, idx].reshape(-1, 1)
-        x_calendar_enc = self.X_calendar[:enc_timesteps, :-num_cal_embedding]
-        x_calendar_enc_emb = self.X_calendar[:enc_timesteps, -num_cal_embedding:].reshape(enc_timesteps, -1)
+        x_calendar_enc = X_calendar[:enc_timesteps, :-num_cal_embedding]
+        x_calendar_enc_emb = X_calendar[:enc_timesteps, -num_cal_embedding:].reshape(enc_timesteps, -1)
         # x_enc = np.concatenate([x_enc_dec_feats_enc, x_calendar_enc,
         #                         x_prev_day_sales_enc, x_enc_only_feats], axis=1)
         x_enc = np.concatenate([x_enc_dec_feats_enc, x_calendar_enc, x_prev_day_sales_enc], axis=1)
@@ -78,8 +93,8 @@ class CustomDataset(data_utils.Dataset):
 
         # input data for decoder
         x_enc_dec_feats_dec = self.X_enc_dec_feats[enc_timesteps:, idx, :-num_embedding].reshape(dec_timesteps, -1)
-        x_calendar_dec = self.X_calendar[enc_timesteps:, :-num_cal_embedding]
-        x_calendar_dec_emb = self.X_calendar[enc_timesteps:, -num_cal_embedding:].reshape(dec_timesteps, -1)
+        x_calendar_dec = X_calendar[enc_timesteps:, :-num_cal_embedding]
+        x_calendar_dec_emb = X_calendar[enc_timesteps:, -num_cal_embedding:].reshape(dec_timesteps, -1)
         x_last_day_sales = self.X_last_day_sales[idx].reshape(-1)
         x_dec = np.concatenate([x_enc_dec_feats_dec, x_calendar_dec], axis=1)
         x_dec_emb = self.X_enc_dec_feats[enc_timesteps:, idx, -num_embedding:].reshape(dec_timesteps, -1)
@@ -97,9 +112,9 @@ class CustomDataset(data_utils.Dataset):
                  torch.from_numpy(x_calendar_dec_emb).long(),
                  torch.from_numpy(x_last_day_sales).float()],
                 self.Y[idx, :], torch.from_numpy(np.array(self.norm_factor[idx])).float(),
-                idx,
-                [self.rmsse_denominator[idx], self.wrmsse_weights[idx]],
-                self.affected_ids[idx]]
+                ids_idx,
+                [scale, weight],
+                affected_ids]
 
 
 class DataLoader:
@@ -117,6 +132,7 @@ class DataLoader:
         self.X_calendar = data_dict['X_calendar']
         self.enc_dec_feat_names = data_dict['enc_dec_feat_names']
         self.Y = data_dict['Y']
+        self.n_windows = 1
 
         # Get all affected series on sales update of each level 12 series (required for WRMSSELoss)
         # Also, initialize predictions for WRMSSELoss calculation by replicating last month sales
@@ -145,20 +161,61 @@ class DataLoader:
         weights = get_weights_level_12(self.Y[:, horizon_start_t-28:horizon_start_t],
                                        self.X_enc_dec_feats[horizon_start_t-28:horizon_start_t, :, sell_price_i].T)
 
-        # Normalize sale features by dividing by median of each series (as per the selected input window)
-        X_prev_day_sales = self.X_prev_day_sales[data_start_t:horizon_start_t].copy().astype(float)
-        norm_factor = np.median(X_prev_day_sales, 0)
-        norm_factor[norm_factor == 0] = 1.
-        X_prev_day_sales = X_prev_day_sales / norm_factor
+        # Run a sliding window of length "window_length" and train for the next month of each window
+        if self.config.sliding_window:
+            window_length = self.config.window_length
+            X_prev_day_sales, X_enc_only_feats, X_enc_dec_feats, X_calendar, Y, norm_factor = [], [], [], [], [], []
+            last_day_sales = []
+
+            for idx, i in enumerate(range(data_start_t + window_length, horizon_end_t, 28)):
+                w_data_start_t, w_horizon_start_t = data_start_t + (idx * 28), i
+                w_horizon_end_t = w_horizon_start_t + 28
+
+                # Normalize sale features by dividing by median of each series (as per the selected input window)
+                w_X_prev_day_sales = self.X_prev_day_sales[w_data_start_t:w_horizon_start_t].copy().astype(float)
+                w_norm_factor = np.median(w_X_prev_day_sales, 0)
+                w_norm_factor[w_norm_factor == 0] = 1.
+                w_X_prev_day_sales = w_X_prev_day_sales / w_norm_factor
+
+                X_prev_day_sales.append(w_X_prev_day_sales)
+                X_enc_only_feats.append(self.X_enc_only_feats[w_data_start_t:w_horizon_start_t])
+                X_enc_dec_feats.append(self.X_enc_dec_feats[w_data_start_t:w_horizon_end_t])
+                X_calendar.append(self.X_calendar[w_data_start_t:w_horizon_end_t])
+                last_day_sales.append(w_X_prev_day_sales[-1])
+                norm_factor.append(w_norm_factor)
+                Y.append(self.Y[:, w_horizon_start_t:w_horizon_end_t])
+
+            self.n_windows = idx + 1
+            X_prev_day_sales = np.concatenate(X_prev_day_sales, 1)
+            X_enc_only_feats = np.concatenate(X_enc_only_feats, 1)
+            X_enc_dec_feats = np.concatenate(X_enc_dec_feats, 1)
+            X_calendar = np.stack(X_calendar, 0)
+            last_day_sales = np.concatenate(last_day_sales, 0)
+            Y = np.concatenate(Y, 0)
+            norm_factor = np.concatenate(norm_factor, 0)
+            window_id = np.arange(idx + 1).repeat(self.X_enc_only_feats.shape[1])
+
+        else:
+            # Normalize sale features by dividing by median of each series (as per the selected input window)
+            X_prev_day_sales = self.X_prev_day_sales[data_start_t:horizon_start_t].copy().astype(float)
+            norm_factor = np.median(X_prev_day_sales, 0)
+            norm_factor[norm_factor == 0] = 1.
+            X_prev_day_sales = X_prev_day_sales / norm_factor
+            X_enc_only_feats = self.X_enc_only_feats[data_start_t:horizon_start_t]
+            X_enc_dec_feats = self.X_enc_dec_feats[data_start_t:horizon_end_t]
+            X_calendar = self.X_calendar[data_start_t:horizon_end_t]
+            last_day_sales = X_prev_day_sales[-1]
+            Y = self.Y[:, horizon_start_t:horizon_end_t]
+            window_id = None
 
         dataset = CustomDataset(X_prev_day_sales,
-                                self.X_enc_only_feats[data_start_t:horizon_start_t],
-                                self.X_enc_dec_feats[data_start_t:horizon_end_t],
-                                self.X_calendar[data_start_t:horizon_end_t], X_prev_day_sales[-1],
+                                X_enc_only_feats,
+                                X_enc_dec_feats,
+                                X_calendar, last_day_sales,
                                 norm_factor,
-                                Y=self.Y[:, horizon_start_t:horizon_end_t],
+                                Y=Y,
                                 rmsse_denominator=np.array(rmsse_den), wrmsse_weights=weights,
-                                affected_ids=self.affected_series_ids)
+                                affected_ids=self.affected_series_ids, window_id=window_id)
 
         return torch.utils.data.DataLoader(dataset=dataset, batch_size=self.config.batch_size, shuffle=True,
                                            num_workers=3, pin_memory=True)
