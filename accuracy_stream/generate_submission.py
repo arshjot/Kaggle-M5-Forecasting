@@ -57,9 +57,10 @@ class SubmissionGenerator:
         print(f' Predict '.center(self.terminal_width, '*'))
         self.model.eval()
         preds = []
-        for i, [x] in enumerate(tqdm(self.test_loader)):
+        for i, [x, norm_factor] in enumerate(tqdm(self.test_loader)):
             x = [inp.to(self.config.device) for inp in x]
-            preds.append(self.model(*x).data.cpu().numpy())
+            norm_factor = norm_factor.to(self.config.device)
+            preds.append((self.model(*x) * norm_factor.unsqueeze(1)).data.cpu().numpy())
 
         predictions = np.concatenate(preds, 0)
         sample_submission = pd.read_csv('../data/sample_submission.csv')

@@ -39,13 +39,14 @@ class CustomDataset(data_utils.Dataset):
     """
 
     def __init__(self, X_prev_day_sales, X_enc_only_feats, X_enc_dec_feats, X_calendar, X_last_day_sales,
-                 Y=None, rmsse_denominator=None, wrmsse_weights=None, affected_ids=None):
+                 norm_factor, Y=None, rmsse_denominator=None, wrmsse_weights=None, affected_ids=None):
 
         self.X_prev_day_sales = X_prev_day_sales
         self.X_enc_only_feats = X_enc_only_feats
         self.X_enc_dec_feats = X_enc_dec_feats
         self.X_calendar = X_calendar
         self.X_last_day_sales = X_last_day_sales
+        self.norm_factor = norm_factor
 
         if Y is not None:
             self.Y = torch.from_numpy(Y).float()
@@ -88,14 +89,14 @@ class CustomDataset(data_utils.Dataset):
                      torch.from_numpy(x_calendar_enc_emb).long(),
                      torch.from_numpy(x_dec).float(), torch.from_numpy(x_dec_emb).long(),
                      torch.from_numpy(x_calendar_dec_emb).long(),
-                     torch.from_numpy(x_last_day_sales).float()]]
+                     torch.from_numpy(x_last_day_sales).float()], self.norm_factor[idx]]
 
         return [[torch.from_numpy(x_enc).float(), torch.from_numpy(x_enc_emb).long(),
                  torch.from_numpy(x_calendar_enc_emb).long(),
                  torch.from_numpy(x_dec).float(), torch.from_numpy(x_dec_emb).long(),
                  torch.from_numpy(x_calendar_dec_emb).long(),
                  torch.from_numpy(x_last_day_sales).float()],
-                self.Y[idx, :],
+                self.Y[idx, :], torch.from_numpy(np.array(self.norm_factor[idx])).float(),
                 idx,
                 [self.rmsse_denominator[idx], self.wrmsse_weights[idx]],
                 self.affected_ids[idx]]
@@ -130,9 +131,9 @@ class DataLoader:
             horizon_end_t = self.config.training_ts['horizon_end_t']
 
         # calculate denominator for rmsse loss
-        squared_movement = ((self.Y.T[data_start_t:horizon_start_t] -
-                             self.X_prev_day_sales[data_start_t:horizon_start_t]).astype(np.int64) ** 2)
-        actively_sold_in_range = (self.X_prev_day_sales[data_start_t:horizon_start_t] != 0).argmax(axis=0)
+        squared_movement = ((self.Y.T[:horizon_start_t] -
+                             self.X_prev_day_sales[:horizon_start_t]).astype(np.int64) ** 2)
+        actively_sold_in_range = (self.X_prev_day_sales[:horizon_start_t] != 0).argmax(axis=0)
         rmsse_den = []
         for idx, first_active_sell_idx in enumerate(actively_sold_in_range):
             den = squared_movement[first_active_sell_idx:, idx].mean()
@@ -144,10 +145,17 @@ class DataLoader:
         weights = get_weights_level_12(self.Y[:, horizon_start_t-28:horizon_start_t],
                                        self.X_enc_dec_feats[horizon_start_t-28:horizon_start_t, :, sell_price_i].T)
 
-        dataset = CustomDataset(self.X_prev_day_sales[data_start_t:horizon_start_t],
+        # Normalize sale features by dividing by median of each series (as per the selected input window)
+        X_prev_day_sales = self.X_prev_day_sales[data_start_t:horizon_start_t].copy().astype(float)
+        norm_factor = np.median(X_prev_day_sales, 0)
+        norm_factor[norm_factor == 0] = 1.
+        X_prev_day_sales = X_prev_day_sales / norm_factor
+
+        dataset = CustomDataset(X_prev_day_sales,
                                 self.X_enc_only_feats[data_start_t:horizon_start_t],
                                 self.X_enc_dec_feats[data_start_t:horizon_end_t],
-                                self.X_calendar[data_start_t:horizon_end_t], self.X_prev_day_sales[horizon_start_t],
+                                self.X_calendar[data_start_t:horizon_end_t], X_prev_day_sales[-1],
+                                norm_factor,
                                 Y=self.Y[:, horizon_start_t:horizon_end_t],
                                 rmsse_denominator=np.array(rmsse_den), wrmsse_weights=weights,
                                 affected_ids=self.affected_series_ids)
@@ -162,9 +170,9 @@ class DataLoader:
             horizon_end_t = self.config.validation_ts['horizon_end_t']
 
         # calculate denominator for rmsse loss
-        squared_movement = ((self.Y.T[data_start_t:horizon_start_t] -
-                             self.X_prev_day_sales[data_start_t:horizon_start_t]).astype(np.int64) ** 2)
-        actively_sold_in_range = (self.X_prev_day_sales[data_start_t:horizon_start_t] != 0).argmax(axis=0)
+        squared_movement = ((self.Y.T[:horizon_start_t] -
+                             self.X_prev_day_sales[:horizon_start_t]).astype(np.int64) ** 2)
+        actively_sold_in_range = (self.X_prev_day_sales[:horizon_start_t] != 0).argmax(axis=0)
         rmsse_den = []
         for idx, first_active_sell_idx in enumerate(actively_sold_in_range):
             den = squared_movement[first_active_sell_idx:, idx].mean()
@@ -176,10 +184,17 @@ class DataLoader:
         weights = get_weights_level_12(self.Y[:, horizon_start_t-28:horizon_start_t],
                                        self.X_enc_dec_feats[horizon_start_t-28:horizon_start_t, :, sell_price_i].T)
 
-        dataset = CustomDataset(self.X_prev_day_sales[data_start_t:horizon_start_t],
+        # Normalize sale features by dividing by median of each series (as per the selected input window)
+        X_prev_day_sales = self.X_prev_day_sales[data_start_t:horizon_start_t].copy().astype(float)
+        norm_factor = np.median(X_prev_day_sales, 0)
+        norm_factor[norm_factor == 0] = 1.
+        X_prev_day_sales = X_prev_day_sales / norm_factor
+
+        dataset = CustomDataset(X_prev_day_sales,
                                 self.X_enc_only_feats[data_start_t:horizon_start_t],
                                 self.X_enc_dec_feats[data_start_t:horizon_end_t],
-                                self.X_calendar[data_start_t:horizon_end_t], self.X_prev_day_sales[horizon_start_t],
+                                self.X_calendar[data_start_t:horizon_end_t], X_prev_day_sales[-1],
+                                norm_factor,
                                 Y=self.Y[:, horizon_start_t:horizon_end_t],
                                 rmsse_denominator=np.array(rmsse_den), wrmsse_weights=weights,
                                 affected_ids=self.affected_series_ids)
@@ -193,10 +208,17 @@ class DataLoader:
             horizon_start_t = self.config.test_ts['horizon_start_t']
             horizon_end_t = self.config.test_ts['horizon_end_t']
 
-        dataset = CustomDataset(self.X_prev_day_sales[data_start_t:horizon_start_t],
+        # Normalize sale features by dividing by median of each series (as per the selected input window)
+        X_prev_day_sales = self.X_prev_day_sales[data_start_t:horizon_start_t].copy().astype(float)
+        norm_factor = np.median(X_prev_day_sales, 0)
+        norm_factor[norm_factor == 0] = 1.
+        X_prev_day_sales = X_prev_day_sales / norm_factor
+
+        dataset = CustomDataset(X_prev_day_sales,
                                 self.X_enc_only_feats[data_start_t:horizon_start_t],
                                 self.X_enc_dec_feats[data_start_t:horizon_end_t],
-                                self.X_calendar[data_start_t:horizon_end_t], self.X_prev_day_sales[horizon_start_t])
+                                self.X_calendar[data_start_t:horizon_end_t], X_prev_day_sales[-1],
+                                norm_factor)
 
         return torch.utils.data.DataLoader(dataset=dataset, batch_size=self.config.batch_size, num_workers=3,
                                            pin_memory=True)

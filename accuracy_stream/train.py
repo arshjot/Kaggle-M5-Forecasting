@@ -86,14 +86,15 @@ class Trainer:
         progbar = tqdm(self.val_loader)
         progbar.set_description("             ")
         losses, sec_metric, epoch_preds, epoch_ids, epoch_ids_idx = [], [], [], [], []
-        for i, [x, y, ids_idx, loss_input, _] in enumerate(progbar):
+        for i, [x, y, norm_factor, ids_idx, loss_input, _] in enumerate(progbar):
             x = [inp.to(self.config.device) for inp in x]
             y = y.to(self.config.device)
+            norm_factor = norm_factor.to(self.config.device)
             loss_input = [inp.to(self.config.device) for inp in loss_input]
             epoch_ids.append(self.ids[ids_idx])
             epoch_ids_idx.append(ids_idx.numpy())
 
-            preds = self.model(*x)
+            preds = self.model(*x) * norm_factor.unsqueeze(1)
             epoch_preds.append(preds.data.cpu().numpy())
             loss = self.criterion(preds, y, *loss_input)
             losses.append(loss.data.cpu().numpy())
@@ -117,9 +118,10 @@ class Trainer:
             progbar = tqdm(self.train_loader)
             losses, sec_metric, epoch_preds, epoch_ids, epoch_ids_idx = [], [], [], [], []
 
-            for i, [x, y, ids_idx, loss_input, affected_ids] in enumerate(progbar):
+            for i, [x, y, norm_factor, ids_idx, loss_input, affected_ids] in enumerate(progbar):
                 x = [inp.to(self.config.device) for inp in x]
                 y = y.to(self.config.device)
+                norm_factor = norm_factor.to(self.config.device)
                 loss_input = [inp.to(self.config.device) for inp in loss_input]
                 affected_ids = affected_ids.to(self.config.device)
 
@@ -127,7 +129,7 @@ class Trainer:
                 epoch_ids_idx.append(ids_idx.numpy())
                 # Forward + Backward + Optimize
                 self.optimizer.zero_grad()
-                preds = self.model(*x)
+                preds = self.model(*x) * norm_factor.unsqueeze(1)
                 epoch_preds.append(preds.data.cpu().numpy())
                 sec_metric.append(self.metric_2(preds, y, *loss_input).data.cpu().numpy())
 
