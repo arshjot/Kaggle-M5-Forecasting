@@ -21,6 +21,6 @@ class SPLMetric:
         quantile_errors = errors * self.quantiles[:, None, None]
         quantile_errors[quantile_errors < 0] -= errors[quantile_errors < 0]
         error = (1/12) * np.sum(
-            weight * quantile_errors.mean(2).sum(0) / scale)
+            weight * quantile_errors.mean(2).mean(0) / scale)
 
         return error

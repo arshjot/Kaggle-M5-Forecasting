@@ -8,6 +8,7 @@ import shutil
 
 from data_loader.data_generator import DataLoader
 from utils.training_utils import ModelCheckpoint
+from utils.data_utils import *
 from config import Config
 
 
@@ -27,13 +28,15 @@ class SubmissionGenerator:
 
         print(f' Loading data '.center(self.terminal_width, '*'))
         data_loader = DataLoader(self.config)
+        self.ids = data_loader.ids
         self.test_loader = data_loader.create_test_loader()
 
         self.sub_dir = self._prepare_dir()
 
     def _prepare_dir(self):
         print(f' Create submission directory '.center(self.terminal_width, '*'))
-        sub_idx = max([int(i[3:]) for i in os.listdir('./submissions')]) + 1
+        subs = [int(i[3:]) for i in os.listdir('./submissions')]
+        sub_idx = max(subs) + 1 if len(subs) > 0 else 1
 
         os.makedirs(f'./submissions/sub{sub_idx}')
 
@@ -63,9 +66,15 @@ class SubmissionGenerator:
             preds.append((self.model(*x) * norm_factor[:, None, None]).data.cpu().numpy())
 
         predictions = np.concatenate(preds, 0)
-        sample_submission = pd.read_csv('../data/sample_submission.csv')
-        sample_submission.iloc[:predictions.shape[0], 1:] = predictions
-        sample_submission.to_csv(f'{self.sub_dir}/submission.csv.gz', compression='gzip', index=False)
+        q_agg_preds = []
+        for i in range(predictions.shape[-1]):
+            q_agg_preds.append(get_aggregated_series(predictions[..., i], self.ids)[0])
+        agg_predictions = np.stack(q_agg_preds).transpose(1, 2, 0)
+
+        sample_submission = pd.read_csv('../data/sample_submission_uncertainty.csv')
+        sample_submission.iloc[:9*agg_predictions.shape[0], 1:] = agg_predictions.transpose(2, 0, 1).reshape(-1, 28)
+        sample_submission.to_csv(f'{self.sub_dir}/submission.csv.gz', compression='gzip', index=False,
+                                 float_format='%.3g')
 
 
 if __name__ == "__main__":

@@ -69,7 +69,7 @@ class SPLLevel12Loss(nn.Module):
         quantile_errors = errors * self.quantiles[:, None, None]
         quantile_errors[quantile_errors < 0] -= errors[quantile_errors < 0]
         loss = torch.sum(
-            weight * quantile_errors.mean(2).sum(0) / scale)
+            weight * quantile_errors.mean(2).mean(0) / scale)
 
         return loss
 
@@ -85,6 +85,6 @@ class SPLLoss(nn.Module):
         quantile_errors = errors * self.quantiles[:, None, None]
         quantile_errors[quantile_errors < 0] -= errors[quantile_errors < 0]
         loss = (1/12) * torch.sum(
-            weight * quantile_errors.mean(2).sum(0) / scale)
+            weight * quantile_errors.mean(2).mean(0) / scale)
 
         return loss

@@ -36,7 +36,7 @@ class Trainer:
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.config.learning_rate)
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, factor=0.5,
                                                                     patience=5, verbose=True)
-        self.early_stopping = EarlyStopping(patience=14)
+        self.early_stopping = EarlyStopping(patience=10)
         self.loss_agg = np.sum if config.loss_fn == 'SPLLevel12Loss' else np.mean
 
         # Metric
@@ -102,7 +102,7 @@ class Trainer:
         validation_agg_preds = np.stack(vl_q_agg_preds).transpose(1, 2, 0)
         val_error = self.metric.get_error(validation_agg_preds,
                                           self.val_metric_t, self.val_metric_s, self.val_metric_w)
-        val_error_2 = self.metric_2.get_error(validation_agg_preds.mean(2),
+        val_error_2 = self.metric_2.get_error(validation_agg_preds[:, :, 4],
                                               self.val_metric_t, self.val_metric_s, self.val_metric_w)
 
         return self.loss_agg(losses), val_error, val_error_2
@@ -131,7 +131,7 @@ class Trainer:
                     if torch.sum(window_id == self.n_windows - 1) > 0:
                         epoch_ids.append(self.ids[ids_idx[window_id == self.n_windows - 1]].reshape(-1, 5))
                         epoch_ids_idx.append(ids_idx[window_id == self.n_windows - 1].numpy())
-                        epoch_preds.append(preds[window_id == self.n_windows - 1].data.cpu().numpy().reshape(-1, 28))
+                        epoch_preds.append(preds[window_id == self.n_windows - 1].data.cpu().numpy().reshape(-1, 28, 9))
                 else:
                     epoch_ids.append(self.ids[ids_idx])
                     epoch_ids_idx.append(ids_idx.numpy())
@@ -164,7 +164,7 @@ class Trainer:
                 train_loss = self.loss_agg(losses)
             train_error = self.metric.get_error(training_agg_preds, self.train_metric_t,
                                                 self.train_metric_s, self.train_metric_w)
-            train_error_2 = self.metric_2.get_error(training_agg_preds.mean(2), self.train_metric_t,
+            train_error_2 = self.metric_2.get_error(training_agg_preds[:, :, 4], self.train_metric_t,
                                                     self.train_metric_s, self.train_metric_w)
 
             val_loss, val_error, val_error_2 = self._get_val_loss_and_err()

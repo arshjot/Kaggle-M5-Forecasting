@@ -317,11 +317,11 @@ class DataLoader:
             self.X_prev_day_sales.T[:, data_start_t:horizon_start_t], self.ids)
 
         # calculate denominator for rmsse loss
-        squared_movement = ((agg_series_Y.T - agg_series_prev_day_sales.T).astype(np.int64) ** 2)
+        absolute_movement = np.absolute(agg_series_Y.T - agg_series_prev_day_sales.T).astype(np.int64)
         actively_sold_in_range = (agg_series_prev_day_sales.T != 0).argmax(axis=0)
         rmsse_den = []
         for idx, first_active_sell_idx in enumerate(actively_sold_in_range):
-            den = squared_movement[first_active_sell_idx:, idx].mean()
+            den = absolute_movement[first_active_sell_idx:, idx].mean()
             den = den if den != 0 else 1
             rmsse_den.append(den)
 
