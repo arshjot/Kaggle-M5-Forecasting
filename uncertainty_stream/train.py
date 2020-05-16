@@ -37,7 +37,8 @@ class Trainer:
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, factor=0.5,
                                                                     patience=5, verbose=True)
         self.early_stopping = EarlyStopping(patience=10)
-        self.loss_agg = np.sum if config.loss_fn == 'SPLLevel12Loss' else np.mean
+        self.agg_sum = self.config.loss_fn[:3] == 'SPL'
+        self.loss_agg = np.sum if self.agg_sum else np.mean
 
         # Metric
         self.metric = getattr(metrics, config.metric)()
@@ -48,12 +49,6 @@ class Trainer:
         self.ids = data_loader.ids
         self.train_loader = data_loader.create_train_loader()
         self.val_loader = data_loader.create_val_loader()
-        self.train_metric_t, self.train_metric_w, self.train_metric_s = data_loader.get_weights_and_scaling(
-            self.config.training_ts['data_start_t'], self.config.training_ts['horizon_start_t'],
-            self.config.training_ts['horizon_end_t'])
-        self.val_metric_t, self.val_metric_w, self.val_metric_s = data_loader.get_weights_and_scaling(
-            self.config.validation_ts['data_start_t'], self.config.validation_ts['horizon_start_t'],
-            self.config.validation_ts['horizon_end_t'])
         self.n_windows = data_loader.n_windows
 
         self.start_epoch, self.min_val_error = 1, None
@@ -78,32 +73,27 @@ class Trainer:
         self.model.eval()
         progbar = tqdm(self.val_loader)
         progbar.set_description("             ")
-        losses, epoch_preds, epoch_ids, epoch_ids_idx = [], [], [], []
-        for i, [x, y, norm_factor, ids_idx, loss_input, _, _] in enumerate(progbar):
+        losses, epoch_preds, epoch_ys, epoch_ws, epoch_scales = [], [], [], [], []
+        for i, [x, y, norm_factor, ids_idx, loss_input, _] in enumerate(progbar):
+            epoch_ys.append(y.data.numpy())
+            epoch_scales.append(loss_input[0].data.numpy())
+            epoch_ws.append(loss_input[1].data.numpy())
+
             x = [inp.to(self.config.device) for inp in x]
             y = y.to(self.config.device)
             norm_factor = norm_factor.to(self.config.device)
             loss_input = [inp.to(self.config.device) for inp in loss_input]
-            epoch_ids.append(self.ids[ids_idx])
-            epoch_ids_idx.append(ids_idx.numpy())
 
             preds = self.model(*x) * norm_factor[:, None, None]
             epoch_preds.append(preds.data.cpu().numpy())
             loss = self.criterion(preds, y, *loss_input)
             losses.append(loss.data.cpu().numpy())
 
-        # Sort to remove shuffle applied by the dataset loader
-        sort_idx = np.argsort(np.concatenate(epoch_ids_idx, axis=0))
-        epoch_preds = np.concatenate(epoch_preds, axis=0)[sort_idx]
-        epoch_ids = np.concatenate(epoch_ids, axis=0)[sort_idx]
-        vl_q_agg_preds = []
-        for i in range(epoch_preds.shape[-1]):
-            vl_q_agg_preds.append(get_aggregated_series(epoch_preds[..., i], epoch_ids)[0])
-        validation_agg_preds = np.stack(vl_q_agg_preds).transpose(1, 2, 0)
-        val_error = self.metric.get_error(validation_agg_preds,
-                                          self.val_metric_t, self.val_metric_s, self.val_metric_w)
-        val_error_2 = self.metric_2.get_error(validation_agg_preds[:, :, 4],
-                                              self.val_metric_t, self.val_metric_s, self.val_metric_w)
+        epoch_preds, epoch_ys = np.concatenate(epoch_preds, axis=0), np.concatenate(epoch_ys, axis=0)
+        epoch_ws, epoch_scales = np.concatenate(epoch_ws, axis=0), np.concatenate(epoch_scales, axis=0)
+
+        val_error = self.metric.get_error(epoch_preds, epoch_ys, epoch_scales, epoch_ws)
+        val_error_2 = self.metric_2.get_error(epoch_preds[:, :, 4], epoch_ys, epoch_scales, epoch_ws)
 
         return self.loss_agg(losses), val_error, val_error_2
 
@@ -114,14 +104,12 @@ class Trainer:
             print(f' Epoch [{epoch}/{self.config.num_epochs}] '.center(self.terminal_width, 'x'))
             self.model.train()
             progbar = tqdm(self.train_loader)
-            losses, epoch_preds, epoch_ids, epoch_ids_idx = [], [], [], []
-
-            for i, [x, y, norm_factor, ids_idx, loss_input, affected_ids, window_id] in enumerate(progbar):
+            losses, epoch_preds, epoch_ys, epoch_ws, epoch_scales = [], [], [], [], []
+            for i, [x, y, norm_factor, ids_idx, loss_input, window_id] in enumerate(progbar):
                 x = [inp.to(self.config.device) for inp in x]
                 y = y.to(self.config.device)
                 norm_factor = norm_factor.to(self.config.device)
                 loss_input = [inp.to(self.config.device) for inp in loss_input]
-                # affected_ids = affected_ids.to(self.config.device)
 
                 # Forward + Backward + Optimize
                 self.optimizer.zero_grad()
@@ -129,18 +117,22 @@ class Trainer:
 
                 if self.config.sliding_window:
                     if torch.sum(window_id == self.n_windows - 1) > 0:
-                        epoch_ids.append(self.ids[ids_idx[window_id == self.n_windows - 1]].reshape(-1, 5))
-                        epoch_ids_idx.append(ids_idx[window_id == self.n_windows - 1].numpy())
+                        epoch_ys.append(y[window_id == self.n_windows - 1].data.cpu().numpy().reshape(-1, 28))
+                        epoch_scales.append(loss_input[0][window_id == self.n_windows - 1]
+                                            .data.cpu().numpy().reshape(-1))
+                        epoch_ws.append(loss_input[1][window_id == self.n_windows - 1]
+                                        .data.cpu().numpy().reshape(-1))
                         epoch_preds.append(preds[window_id == self.n_windows - 1].data.cpu().numpy().reshape(-1, 28, 9))
                 else:
-                    epoch_ids.append(self.ids[ids_idx])
-                    epoch_ids_idx.append(ids_idx.numpy())
-                    epoch_preds.append(preds.data.cpu().numpy())
+                    epoch_ys.append(y.data.cpu().numpy())
+                    epoch_scales.append(loss_input[0].data.cpu().numpy())
+                    epoch_ws.append(loss_input[1].data.cpu().numpy())
+                    epoch_preds.append(preds.data.cpu().cpu().numpy())
 
                 loss = self.criterion(preds, y, *loss_input)
                 losses.append(loss.data.cpu().numpy())
 
-                if self.config.loss_fn == 'SPLLevel12Loss':
+                if self.agg_sum:
                     progbar.set_description("loss = %0.3f " % np.round(
                         (len(self.train_loader) / (i + 1)) * self.loss_agg(losses) / self.n_windows, 3))
                 else:
@@ -150,22 +142,16 @@ class Trainer:
                 self.optimizer.step()
 
             # Get training and validation loss and error
-            # Sort to remove shuffle applied by the dataset loader
-            sort_idx = np.argsort(np.concatenate(epoch_ids_idx, axis=0))
-            epoch_preds = np.concatenate(epoch_preds, axis=0)[sort_idx]
-            epoch_ids = np.concatenate(epoch_ids, axis=0)[sort_idx]
-            tr_q_agg_preds = []
-            for i in range(epoch_preds.shape[-1]):
-                tr_q_agg_preds.append(get_aggregated_series(epoch_preds[..., i], epoch_ids)[0])
-            training_agg_preds = np.stack(tr_q_agg_preds).transpose(1, 2, 0)
-            if self.config.loss_fn == 'SPLLevel12Loss':
+            epoch_preds, epoch_ys = np.concatenate(epoch_preds, axis=0), np.concatenate(epoch_ys, axis=0)
+            epoch_ws, epoch_scales = np.concatenate(epoch_ws, axis=0), np.concatenate(epoch_scales, axis=0)
+
+            if self.agg_sum:
                 train_loss = self.loss_agg(losses) / self.n_windows
             else:
                 train_loss = self.loss_agg(losses)
-            train_error = self.metric.get_error(training_agg_preds, self.train_metric_t,
-                                                self.train_metric_s, self.train_metric_w)
-            train_error_2 = self.metric_2.get_error(training_agg_preds[:, :, 4], self.train_metric_t,
-                                                    self.train_metric_s, self.train_metric_w)
+
+            train_error = self.metric.get_error(epoch_preds, epoch_ys, epoch_scales, epoch_ws)
+            train_error_2 = self.metric_2.get_error(epoch_preds[:, :, 4], epoch_ys, epoch_scales, epoch_ws)
 
             val_loss, val_error, val_error_2 = self._get_val_loss_and_err()
 

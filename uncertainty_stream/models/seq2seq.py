@@ -103,7 +103,7 @@ class Seq2Seq(nn.Module):
 
 def create_model(config):
     # for item_id, dept_id, cat_id, store_id, state_id respectively
-    embedding_sizes = [(3049, 50), (7, 4), (3, 2), (10, 5), (3, 2)]
+    embedding_sizes = [(3049 + 1, 50), (7 + 1, 4), (3 + 1, 2), (10 + 1, 5), (3 + 1, 2)]
     cal_embedding_sizes = (31, 16)
     num_features_enc = 12 + sum([j for i, j in embedding_sizes]) + cal_embedding_sizes[1] * 2
     num_features_dec = 12 + sum([j for i, j in embedding_sizes]) + cal_embedding_sizes[1] * 2

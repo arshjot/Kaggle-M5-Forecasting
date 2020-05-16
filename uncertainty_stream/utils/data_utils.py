@@ -192,13 +192,13 @@ def get_weights_all_levels(sales, sell_price, sales_data_ids):
     return weights, agg_series_id
 
 
-def get_weights_level_12(sales, sell_price):
+def get_weights(sales, sell_price):
     """
-    Generates weights for only 30,490 level 12 series
+    Generates weights for only given series
 
     Input data format:
-    sales: np array of shape (30490, 28)
-    sell_price: np array of shape (30490, 28)
+    sales: np array of shape (num_series, 28)
+    sell_price: np array of shape (num_series, 28)
     """
 
     assert (sales.shape == sell_price.shape), "Sell price and Sales arrays have different sizes"
@@ -210,6 +210,113 @@ def get_weights_level_12(sales, sell_price):
     weights = dollar_sales / dollar_sales.sum()
 
     return weights
+
+
+def get_aggregated_encodings(encoded_feats, sales_data_ids):
+    """
+    Aggregates 30,490 level 12 series to generate encoding data for all 42,840 series
+    The grouped features at each level are encoded as num_categories + 1
+
+    Input data format:
+    encoded_feats: np array of shape (30490, num_timesteps, 5)
+                    with 'item_id', 'dept_id', 'cat_id', 'store_id', 'state_id' as the columns
+    sales_data_ids: np array of shape (30490, 5)
+                    with 'item_id', 'dept_id', 'cat_id', 'store_id', 'state_id' as the columns
+    """
+
+    num_timesteps = encoded_feats.shape[1]
+    # Note - assuming the encoded value is same for all the timesteps of a series
+    encoded_feats = encoded_feats[:, 0]
+    df = pd.DataFrame({col: sales_data_ids[:, i] for col, i in
+                       zip(['item_id', 'dept_id', 'cat_id', 'store_id', 'state_id'], range(0, 5))})
+    df = pd.concat([df, pd.DataFrame(encoded_feats)], axis=1)
+    data_cols = [i for i in range(0, encoded_feats.shape[1])]
+    encode_value = np.array([df[i].nunique() for i in data_cols])
+
+    agg_series, agg_series_id = [], []
+
+    # Level 1
+    agg_series.append(encode_value.reshape(1, -1))
+    agg_series_id.append(np.array(['Level1_Total_X']))
+
+    # Level 2
+    agg = df.groupby(['state_id'])[4].mean()
+    encoded = np.repeat(encode_value[np.newaxis, :], agg.shape[0], axis=0)
+    encoded[:, 4] = agg.values
+    agg_series.append(encoded)
+    agg_series_id.append(('Level2_' + agg.index.values + '_X'))
+
+    # Level 3
+    agg = df.groupby(['store_id'])[3].mean()
+    encoded = np.repeat(encode_value[np.newaxis, :], agg.shape[0], axis=0)
+    encoded[:, 3] = agg.values
+    agg_series.append(encoded)
+    agg_series_id.append(('Level3_' + agg.index.values + '_X'))
+
+    # Level 4
+    agg = df.groupby(['cat_id'])[2].mean()
+    encoded = np.repeat(encode_value[np.newaxis, :], agg.shape[0], axis=0)
+    encoded[:, 2] = agg.values
+    agg_series.append(encoded)
+    agg_series_id.append(('Level4_' + agg.index.values + '_X'))
+
+    # Level 5
+    agg = df.groupby(['dept_id'])[1].mean()
+    encoded = np.repeat(encode_value[np.newaxis, :], agg.shape[0], axis=0)
+    encoded[:, 1] = agg.values
+    agg_series.append(encoded)
+    agg_series_id.append(('Level5_' + agg.index.values + '_X'))
+
+    # Level 6
+    agg = df.groupby(['state_id', 'cat_id'])[[4, 2]].mean()
+    encoded = np.repeat(encode_value[np.newaxis, :], agg.shape[0], axis=0)
+    encoded[:, [4, 2]] = agg.values
+    agg_series.append(encoded)
+    agg_series_id.append('Level6_' + agg.index.get_level_values(0) + '_' + agg.index.get_level_values(1))
+
+    # Level 7
+    agg = df.groupby(['state_id', 'dept_id'])[[4, 1]].mean()
+    encoded = np.repeat(encode_value[np.newaxis, :], agg.shape[0], axis=0)
+    encoded[:, [4, 1]] = agg.values
+    agg_series.append(encoded)
+    agg_series_id.append('Level7_' + agg.index.get_level_values(0) + '_' + agg.index.get_level_values(1))
+
+    # Level 8
+    agg = df.groupby(['store_id', 'cat_id'])[[3, 2]].mean()
+    encoded = np.repeat(encode_value[np.newaxis, :], agg.shape[0], axis=0)
+    encoded[:, [3, 2]] = agg.values
+    agg_series.append(encoded)
+    agg_series_id.append('Level8_' + agg.index.get_level_values(0) + '_' + agg.index.get_level_values(1))
+
+    # Level 9
+    agg = df.groupby(['store_id', 'dept_id'])[[3, 1]].mean()
+    encoded = np.repeat(encode_value[np.newaxis, :], agg.shape[0], axis=0)
+    encoded[:, [3, 1]] = agg.values
+    agg_series.append(encoded)
+    agg_series_id.append('Level9_' + agg.index.get_level_values(0) + '_' + agg.index.get_level_values(1))
+
+    # Level 10
+    agg = df.groupby(['item_id'])[0].mean()
+    encoded = np.repeat(encode_value[np.newaxis, :], agg.shape[0], axis=0)
+    encoded[:, 0] = agg.values
+    agg_series.append(encoded)
+    agg_series_id.append(('Level10_' + agg.index.values + '_X'))
+
+    # Level 11
+    agg = df.groupby(['state_id', 'item_id'])[[4, 0]].mean()
+    encoded = np.repeat(encode_value[np.newaxis, :], agg.shape[0], axis=0)
+    encoded[:, [4, 0]] = agg.values
+    agg_series.append(encoded)
+    agg_series_id.append('Level11_' + agg.index.get_level_values(0) + '_' + agg.index.get_level_values(1))
+
+    # Level 12
+    agg = df.set_index(['item_id', 'store_id'])[data_cols]
+    agg_series.append(agg.values)
+    agg_series_id.append('Level12_' + agg.index.get_level_values(0) + '_' + agg.index.get_level_values(1))
+
+    agg_series = np.repeat(np.concatenate(agg_series, axis=0)[:, np.newaxis, :], num_timesteps, axis=1)
+
+    return agg_series, np.concatenate(agg_series_id, axis=0).astype('<U28')
 
 
 def update_preds_acc_hierarchy(prev_preds, preds, affected_ids):
