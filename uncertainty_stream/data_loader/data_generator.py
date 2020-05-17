@@ -132,11 +132,13 @@ class DataLoader:
         self.X_prev_day_sales = self.X_prev_day_sales.T
 
         self.X_enc_dec_feats = data_dict['X_enc_dec_feats']
+        self.sell_price_l12 = self.X_enc_dec_feats[:, :, sell_price_i]
         sell_price_all, _, _ = get_aggregated_series(self.X_enc_dec_feats[:, :, sell_price_i].T, self.ids)
         encodings_all, _ = get_aggregated_encodings(self.X_enc_dec_feats[:, :, 1:].transpose(1, 0, 2), self.ids)
         self.X_enc_dec_feats = np.concatenate([sell_price_all[:, :, np.newaxis], encodings_all], axis=2)\
             .transpose(1, 0, 2)
 
+        self.Y_l12 = data_dict['Y']
         self.Y, _, _ = get_aggregated_series(data_dict['Y'], self.ids)
 
         self.X_enc_only_feats = data_dict['X_enc_only_feats']
@@ -170,11 +172,10 @@ class DataLoader:
                     rmsse_den.append(den)
                 scales.append(np.array(rmsse_den))
 
-                # Get level 12 weights for WRMSSE loss (level 12)
-                sell_price_i = self.enc_dec_feat_names.index('sell_price')
-                w_weights = get_weights(self.Y[:, w_horizon_start_t - 28:w_horizon_start_t],
-                                        self.X_enc_dec_feats[w_horizon_start_t - 28:w_horizon_start_t, :,
-                                        sell_price_i].T)
+                # Get weights for WRMSSE and SPL loss
+                w_weights, _ = get_weights_all_levels(self.Y_l12[:, w_horizon_start_t - 28:w_horizon_start_t],
+                                                      self.sell_price_l12[w_horizon_start_t - 28:w_horizon_start_t, :].T,
+                                                      self.ids)
                 weights.append(w_weights)
 
                 # Normalize sale features by dividing by median of each series (as per the selected input window)
@@ -214,10 +215,10 @@ class DataLoader:
                 den = den if den != 0 else 1
                 rmsse_den.append(den)
 
-            # Get level 12 weights for WRMSSE loss (level 12)
-            sell_price_i = self.enc_dec_feat_names.index('sell_price')
-            weights = get_weights(self.Y[:, horizon_start_t - 28:horizon_start_t],
-                                  self.X_enc_dec_feats[horizon_start_t - 28:horizon_start_t, :, sell_price_i].T)
+            # Get weights for WRMSSE and SPL loss
+            weights, _ = get_weights_all_levels(self.Y_l12[:, horizon_start_t - 28:horizon_start_t],
+                                                self.sell_price_l12[horizon_start_t - 28:horizon_start_t, :].T,
+                                                self.ids)
 
             # Normalize sale features by dividing by median of each series (as per the selected input window)
             X_prev_day_sales = self.X_prev_day_sales[data_start_t:horizon_start_t].copy().astype(float)
@@ -260,10 +261,10 @@ class DataLoader:
             den = den if den != 0 else 1
             rmsse_den.append(den)
 
-        # Get level 12 weights for WRMSSE loss (level 12)
-        sell_price_i = self.enc_dec_feat_names.index('sell_price')
-        weights = get_weights(self.Y[:, horizon_start_t-28:horizon_start_t],
-                              self.X_enc_dec_feats[horizon_start_t-28:horizon_start_t, :, sell_price_i].T)
+        # Get weights for WRMSSE and SPL loss
+        weights, _ = get_weights_all_levels(self.Y_l12[:, horizon_start_t-28:horizon_start_t],
+                                            self.sell_price_l12[horizon_start_t-28:horizon_start_t, :].T,
+                                            self.ids)
 
         # Normalize sale features by dividing by median of each series (as per the selected input window)
         X_prev_day_sales = self.X_prev_day_sales[data_start_t:horizon_start_t].copy().astype(float)

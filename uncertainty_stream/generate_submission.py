@@ -66,13 +66,8 @@ class SubmissionGenerator:
             preds.append((self.model(*x) * norm_factor[:, None, None]).data.cpu().numpy())
 
         predictions = np.concatenate(preds, 0)
-        q_agg_preds = []
-        for i in range(predictions.shape[-1]):
-            q_agg_preds.append(get_aggregated_series(predictions[..., i], self.ids)[0])
-        agg_predictions = np.stack(q_agg_preds).transpose(1, 2, 0)
-
         sample_submission = pd.read_csv('../data/sample_submission_uncertainty.csv')
-        sample_submission.iloc[:9*agg_predictions.shape[0], 1:] = agg_predictions.transpose(2, 0, 1).reshape(-1, 28)
+        sample_submission.iloc[:9*predictions.shape[0], 1:] = predictions.transpose(2, 0, 1).reshape(-1, 28)
         sample_submission.to_csv(f'{self.sub_dir}/submission.csv.gz', compression='gzip', index=False,
                                  float_format='%.3g')
 
