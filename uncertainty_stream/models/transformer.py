@@ -114,33 +114,28 @@ class TransformerModel(nn.Module):
         # as actual x_prev_sales is not available
         if self.training:
             x_dec = torch.cat([x_dec, x_prev_day_sales_dec], dim=2)
-            y_mask = torch.tril(torch.ones((self.pred_len, self.pred_len))).bool()
-            predictions = self.decoder(encoder_output, y_mask, x_dec, x_dec_emb, x_cal_dec_emb)
+            y_mask = torch.tril(torch.ones((self.pred_len, self.pred_len))).bool().to(self.config.device)
+            decoder_output = self.decoder(encoder_output, y_mask, x_dec, x_dec_emb, x_cal_dec_emb)
+
         else:
-            # create a tensor to store the outputs
-            predictions = torch.zeros(batch_size, self.pred_len, 9).to(self.config.device)
+            with torch.no_grad():
+                for timestep in range(self.pred_len):
+                    if timestep == 0:
+                        # for the first timestep of decoder, use previous steps' sales
+                        dec_input = torch.cat([x_dec[:, 0, :], x_prev_day_sales_dec[:, 0]], dim=1).unsqueeze(1)
+                    else:
+                        # for next timestep, current timestep's output will serve as the input along with other features
+                        prev_sales = torch.cat([x_prev_day_sales_dec[:, 0].unsqueeze(1),
+                                                decoder_output[:, :timestep, 4].view(batch_size, -1, 1)], dim=1)
+                        dec_input = torch.cat([x_dec[:, :timestep + 1, :], prev_sales], dim=2)
 
-            for timestep in range(self.pred_len):
+                    y_mask = torch.tril(torch.ones((timestep + 1, timestep + 1))).bool().to(self.config.device)
+                    decoder_output = self.decoder(encoder_output, y_mask, dec_input,
+                                                  x_dec_emb[:, :timestep + 1, :].view(batch_size, timestep + 1, -1),
+                                                  x_cal_dec_emb[:, :timestep + 1, :]
+                                                  .view(batch_size, timestep + 1, -1))
 
-                if timestep == 0:
-                    # for the first timestep of decoder, use previous steps' sales
-                    dec_input = torch.cat([x_dec[:, 0, :], x_prev_day_sales_dec[:, 0]], dim=1).unsqueeze(1)
-                else:
-                    # for next timestep, current timestep's output will serve as the input along with other features
-                    prev_sales = torch.cat([x_prev_day_sales_dec[:, 0].unsqueeze(1),
-                                            decoder_output[:, :timestep, 4].view(batch_size, -1, 1)], dim=1)
-                    dec_input = torch.cat([x_dec[:, :timestep + 1, :], prev_sales], dim=2)
-
-                y_mask = torch.tril(torch.ones((timestep + 1, timestep + 1))).bool()
-                decoder_output = self.decoder(encoder_output, y_mask, dec_input,
-                                              x_dec_emb[:, :timestep + 1, :].view(batch_size, timestep + 1, -1),
-                                              x_cal_dec_emb[:, :timestep + 1, :]
-                                              .view(batch_size, timestep + 1, -1))
-
-                # add predictions to predictions tensor
-                predictions[:, timestep] = decoder_output[:, timestep, :]
-
-        return predictions
+        return decoder_output
 
 
 def create_model(config):
