@@ -38,14 +38,14 @@ class CustomDataset(data_utils.Dataset):
     y: targets (only in training phase)
     """
 
-    def __init__(self, X_prev_day_sales, X_enc_only_feats, X_enc_dec_feats, X_calendar, X_last_day_sales,
+    def __init__(self, X_prev_day_sales, X_enc_only_feats, X_enc_dec_feats, X_calendar, X_prev_day_sales_dec,
                  norm_factor, Y=None, rmsse_denominator=None, wrmsse_weights=None, window_id=None):
 
         self.X_prev_day_sales = X_prev_day_sales
         self.X_enc_only_feats = X_enc_only_feats
         self.X_enc_dec_feats = X_enc_dec_feats
         self.X_calendar = X_calendar
-        self.X_last_day_sales = X_last_day_sales
+        self.X_prev_day_sales_dec = X_prev_day_sales_dec
         self.norm_factor = norm_factor
         self.window_id = window_id
 
@@ -94,7 +94,7 @@ class CustomDataset(data_utils.Dataset):
         x_enc_dec_feats_dec = self.X_enc_dec_feats[enc_timesteps:, idx, :-num_embedding].reshape(dec_timesteps, -1)
         x_calendar_dec = X_calendar[enc_timesteps:, :-num_cal_embedding]
         x_calendar_dec_emb = X_calendar[enc_timesteps:, -num_cal_embedding:].reshape(dec_timesteps, -1)
-        x_last_day_sales = self.X_last_day_sales[idx].reshape(-1)
+        x_prev_day_sales_dec = self.X_prev_day_sales_dec[:, idx].reshape(-1, 1)
         x_dec = np.concatenate([x_enc_dec_feats_dec, x_calendar_dec], axis=1)
         x_dec_emb = self.X_enc_dec_feats[enc_timesteps:, idx, -num_embedding:].reshape(dec_timesteps, -1)
 
@@ -103,13 +103,13 @@ class CustomDataset(data_utils.Dataset):
                      torch.from_numpy(x_calendar_enc_emb).long(),
                      torch.from_numpy(x_dec).float(), torch.from_numpy(x_dec_emb).long(),
                      torch.from_numpy(x_calendar_dec_emb).long(),
-                     torch.from_numpy(x_last_day_sales).float()], self.norm_factor[idx]]
+                     torch.from_numpy(x_prev_day_sales_dec).float()], self.norm_factor[idx]]
 
         return [[torch.from_numpy(x_enc).float(), torch.from_numpy(x_enc_emb).long(),
                  torch.from_numpy(x_calendar_enc_emb).long(),
                  torch.from_numpy(x_dec).float(), torch.from_numpy(x_dec_emb).long(),
                  torch.from_numpy(x_calendar_dec_emb).long(),
-                 torch.from_numpy(x_last_day_sales).float()],
+                 torch.from_numpy(x_prev_day_sales_dec).float()],
                 self.Y[idx, :], torch.from_numpy(np.array(self.norm_factor[idx])).float(),
                 ids_idx,
                 [scale, weight],
@@ -126,14 +126,14 @@ class DataLoader:
 
         self.ids = data_dict['sales_data_ids']
         self.enc_dec_feat_names = data_dict['enc_dec_feat_names']
-        sell_price_i = self.enc_dec_feat_names.index('sell_price')
+        self.sell_price_i = self.enc_dec_feat_names.index('sell_price')
 
         self.X_prev_day_sales, _, _ = get_aggregated_series(data_dict['X_prev_day_sales'].T, self.ids)
         self.X_prev_day_sales = self.X_prev_day_sales.T
 
         self.X_enc_dec_feats = data_dict['X_enc_dec_feats']
-        self.sell_price_l12 = self.X_enc_dec_feats[:, :, sell_price_i]
-        sell_price_all, _, _ = get_aggregated_series(self.X_enc_dec_feats[:, :, sell_price_i].T, self.ids)
+        self.sell_price_l12 = self.X_enc_dec_feats[:, :, self.sell_price_i]
+        sell_price_all, _, _ = get_aggregated_series(self.X_enc_dec_feats[:, :, self.sell_price_i].T, self.ids)
         encodings_all, _ = get_aggregated_encodings(self.X_enc_dec_feats[:, :, 1:].transpose(1, 0, 2), self.ids)
         self.X_enc_dec_feats = np.concatenate([sell_price_all[:, :, np.newaxis], encodings_all], axis=2)\
             .transpose(1, 0, 2)
@@ -155,7 +155,7 @@ class DataLoader:
         if self.config.sliding_window:
             window_length = self.config.window_length
             X_prev_day_sales, X_enc_only_feats, X_enc_dec_feats, X_calendar, Y, norm_factor = [], [], [], [], [], []
-            last_day_sales, weights, scales = [], [], []
+            X_prev_day_sales_dec, weights, scales = [], [], []
 
             for idx, i in enumerate(range(data_start_t + window_length, horizon_end_t, 28)):
                 w_data_start_t, w_horizon_start_t = data_start_t + (idx * 28), i
@@ -183,12 +183,20 @@ class DataLoader:
                 w_norm_factor = np.median(w_X_prev_day_sales, 0)
                 w_norm_factor[w_norm_factor == 0] = 1.
                 w_X_prev_day_sales = w_X_prev_day_sales / w_norm_factor
+                w_X_prev_day_sales_dec = self.X_prev_day_sales[w_horizon_start_t:w_horizon_end_t]\
+                                             .copy().astype(float) / norm_factor
+                
+                w_X_enc_dec_feats = self.X_enc_dec_feats[w_data_start_t:w_horizon_end_t]
+                w_X_sell_p = self.X_enc_dec_feats[w_data_start_t:w_horizon_start_t, :, self.sell_price_i].copy().astype(float)
+                w_norm_factor_sell_p = np.median(w_X_sell_p, 0)
+                w_norm_factor_sell_p[w_norm_factor_sell_p == 0] = 1.
+                w_X_enc_dec_feats[:, :, self.sell_price_i] = w_X_enc_dec_feats[:, :, self.sell_price_i] / w_norm_factor_sell_p
 
                 X_prev_day_sales.append(w_X_prev_day_sales)
                 X_enc_only_feats.append(self.X_enc_only_feats[w_data_start_t:w_horizon_start_t])
-                X_enc_dec_feats.append(self.X_enc_dec_feats[w_data_start_t:w_horizon_end_t])
+                X_enc_dec_feats.append(w_X_enc_dec_feats)
                 X_calendar.append(self.X_calendar[w_data_start_t:w_horizon_end_t])
-                last_day_sales.append(w_X_prev_day_sales[-1])
+                X_prev_day_sales_dec.append(w_X_prev_day_sales_dec)
                 norm_factor.append(w_norm_factor)
                 Y.append(self.Y[:, w_horizon_start_t:w_horizon_end_t])
 
@@ -197,7 +205,7 @@ class DataLoader:
             X_enc_only_feats = np.concatenate(X_enc_only_feats, 1)
             X_enc_dec_feats = np.concatenate(X_enc_dec_feats, 1)
             X_calendar = np.stack(X_calendar, 0)
-            last_day_sales = np.concatenate(last_day_sales, 0)
+            X_prev_day_sales_dec = np.concatenate(X_prev_day_sales_dec, 1)
             Y = np.concatenate(Y, 0)
             scales = np.concatenate(scales, 0)
             weights = np.concatenate(weights, 0)
@@ -225,11 +233,17 @@ class DataLoader:
             norm_factor = np.median(X_prev_day_sales, 0)
             norm_factor[norm_factor == 0] = 1.
             X_prev_day_sales = X_prev_day_sales / norm_factor
+            X_prev_day_sales_dec = self.X_prev_day_sales[horizon_start_t:horizon_end_t]\
+                                       .copy().astype(float) / norm_factor
+            
+            X_enc_dec_feats = self.X_enc_dec_feats[data_start_t:horizon_end_t]
+            X_sell_p = self.X_enc_dec_feats[data_start_t:horizon_start_t, :, self.sell_price_i].copy().astype(float)
+            norm_factor_sell_p = np.median(X_sell_p, 0)
+            norm_factor_sell_p[norm_factor_sell_p == 0] = 1.
+            X_enc_dec_feats[:, :, self.sell_price_i] = X_enc_dec_feats[:, :, self.sell_price_i] / norm_factor_sell_p
 
             X_enc_only_feats = self.X_enc_only_feats[data_start_t:horizon_start_t]
-            X_enc_dec_feats = self.X_enc_dec_feats[data_start_t:horizon_end_t]
             X_calendar = self.X_calendar[data_start_t:horizon_end_t]
-            last_day_sales = X_prev_day_sales[-1]
             Y = self.Y[:, horizon_start_t:horizon_end_t]
             scales = np.array(rmsse_den)
             window_id = None
@@ -237,7 +251,7 @@ class DataLoader:
         dataset = CustomDataset(X_prev_day_sales,
                                 X_enc_only_feats,
                                 X_enc_dec_feats,
-                                X_calendar, last_day_sales,
+                                X_calendar, X_prev_day_sales_dec,
                                 norm_factor,
                                 Y=Y,
                                 rmsse_denominator=scales, wrmsse_weights=weights, window_id=window_id)
@@ -271,11 +285,19 @@ class DataLoader:
         norm_factor = np.median(X_prev_day_sales, 0)
         norm_factor[norm_factor == 0] = 1.
         X_prev_day_sales = X_prev_day_sales / norm_factor
+        X_prev_day_sales_dec = self.X_prev_day_sales[horizon_start_t:horizon_end_t] \
+                                   .copy().astype(float) / norm_factor
+
+        X_enc_dec_feats = self.X_enc_dec_feats[data_start_t:horizon_end_t]
+        X_sell_p = self.X_enc_dec_feats[data_start_t:horizon_start_t, :, self.sell_price_i].copy().astype(float)
+        norm_factor_sell_p = np.median(X_sell_p, 0)
+        norm_factor_sell_p[norm_factor_sell_p == 0] = 1.
+        X_enc_dec_feats[:, :, self.sell_price_i] = X_enc_dec_feats[:, :, self.sell_price_i] / norm_factor_sell_p
 
         dataset = CustomDataset(X_prev_day_sales,
                                 self.X_enc_only_feats[data_start_t:horizon_start_t],
-                                self.X_enc_dec_feats[data_start_t:horizon_end_t],
-                                self.X_calendar[data_start_t:horizon_end_t], X_prev_day_sales[-1],
+                                X_enc_dec_feats,
+                                self.X_calendar[data_start_t:horizon_end_t], X_prev_day_sales_dec,
                                 norm_factor,
                                 Y=self.Y[:, horizon_start_t:horizon_end_t],
                                 rmsse_denominator=np.array(rmsse_den), wrmsse_weights=weights)
@@ -294,11 +316,19 @@ class DataLoader:
         norm_factor = np.median(X_prev_day_sales, 0)
         norm_factor[norm_factor == 0] = 1.
         X_prev_day_sales = X_prev_day_sales / norm_factor
+        X_prev_day_sales_dec = self.X_prev_day_sales[horizon_start_t:horizon_end_t] \
+                                   .copy().astype(float) / norm_factor
 
+        X_enc_dec_feats = self.X_enc_dec_feats[data_start_t:horizon_end_t]
+        X_sell_p = self.X_enc_dec_feats[data_start_t:horizon_start_t, :, self.sell_price_i].copy().astype(float)
+        norm_factor_sell_p = np.median(X_sell_p, 0)
+        norm_factor_sell_p[norm_factor_sell_p == 0] = 1.
+        X_enc_dec_feats[:, :, self.sell_price_i] = X_enc_dec_feats[:, :, self.sell_price_i] / norm_factor_sell_p
+        
         dataset = CustomDataset(X_prev_day_sales,
                                 self.X_enc_only_feats[data_start_t:horizon_start_t],
-                                self.X_enc_dec_feats[data_start_t:horizon_end_t],
-                                self.X_calendar[data_start_t:horizon_end_t], X_prev_day_sales[-1],
+                                X_enc_dec_feats,
+                                self.X_calendar[data_start_t:horizon_end_t], X_prev_day_sales_dec,
                                 norm_factor)
 
         return torch.utils.data.DataLoader(dataset=dataset, batch_size=self.config.batch_size, num_workers=3,
