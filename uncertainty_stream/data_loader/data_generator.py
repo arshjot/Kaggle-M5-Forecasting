@@ -184,7 +184,7 @@ class DataLoader:
                 w_norm_factor[w_norm_factor == 0] = 1.
                 w_X_prev_day_sales = w_X_prev_day_sales / w_norm_factor
                 w_X_prev_day_sales_dec = self.X_prev_day_sales[w_horizon_start_t:w_horizon_end_t]\
-                                             .copy().astype(float) / norm_factor
+                                             .copy().astype(float) / w_norm_factor
                 
                 w_X_enc_dec_feats = self.X_enc_dec_feats[w_data_start_t:w_horizon_end_t]
                 w_X_sell_p = self.X_enc_dec_feats[w_data_start_t:w_horizon_start_t, :, self.sell_price_i].copy().astype(float)

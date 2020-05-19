@@ -127,16 +127,18 @@ class TransformerModel(nn.Module):
                     dec_input = torch.cat([x_dec[:, 0, :], x_prev_day_sales_dec[:, 0]], dim=1).unsqueeze(1)
                 else:
                     # for next timestep, current timestep's output will serve as the input along with other features
-                    dec_input = torch.cat([x_dec[:, timestep, :], decoder_output[:, 4].unsqueeze(1)], dim=1)\
-                        .unsqueeze(1)
+                    prev_sales = torch.cat([x_prev_day_sales_dec[:, 0].unsqueeze(1),
+                                            decoder_output[:, :timestep, 4].view(batch_size, -1, 1)], dim=1)
+                    dec_input = torch.cat([x_dec[:, :timestep + 1, :], prev_sales], dim=2)
 
-                y_mask = torch.tril(torch.ones((1, 1))).bool()
+                y_mask = torch.tril(torch.ones((timestep + 1, timestep + 1))).bool()
                 decoder_output = self.decoder(encoder_output, y_mask, dec_input,
-                                              x_dec_emb[:, timestep, :].unsqueeze(1),
-                                              x_cal_dec_emb[:, timestep, :].unsqueeze(1))[:, 0, :]
+                                              x_dec_emb[:, :timestep + 1, :].view(batch_size, timestep + 1, -1),
+                                              x_cal_dec_emb[:, :timestep + 1, :]
+                                              .view(batch_size, timestep + 1, -1))
 
                 # add predictions to predictions tensor
-                predictions[:, timestep] = decoder_output
+                predictions[:, timestep] = decoder_output[:, timestep, :]
 
         return predictions
 

@@ -25,10 +25,10 @@ class Config:
 
     # *** Transformer *** #
     enc_nhead = 8
-    enc_nlayers = 6
+    enc_nlayers = 4
     enc_dropout = 0.1
-    dec_nhead = 8
-    dec_nlayers = 6
+    dec_nhead = 4
+    dec_nlayers = 2
     dec_dropout = 0.1
 
     num_epochs = 200
@@ -38,9 +38,9 @@ class Config:
     # training, validation and test periods
     training_ts = {'data_start_t': 1969 - 1 - (28 * 30), 'horizon_start_t': 1969 - 1 - (28 * 4),
                    'horizon_end_t': 1969 - 1 - (28 * 3)}
-    validation_ts = {'data_start_t': 1969 - 1 - (28 * 29), 'horizon_start_t': 1969 - 1 - (28 * 3),
+    validation_ts = {'data_start_t': 1969 - 1 - (28 * 16), 'horizon_start_t': 1969 - 1 - (28 * 3),
                      'horizon_end_t': 1969 - 1 - (28 * 2)}
-    test_ts = {'data_start_t': 1969 - 1 - (28 * 28), 'horizon_start_t': 1969 - 1 - (28 * 2),
+    test_ts = {'data_start_t': 1969 - 1 - (28 * 15), 'horizon_start_t': 1969 - 1 - (28 * 2),
                'horizon_end_t': 1969 - 1 - (28 * 1)}
 
     data_file = '../accuracy_stream/data/data.pickle'
