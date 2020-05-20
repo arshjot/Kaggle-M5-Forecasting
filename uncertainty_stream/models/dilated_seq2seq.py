@@ -74,6 +74,9 @@ class Seq2Seq(nn.Module):
         self.decoder = decoder
         self.config = config
 
+        self.fc_h0 = nn.Linear(sum([2**i for i in range(config.rnn_num_layers)]), config.rnn_num_layers)
+        self.fc_h1 = nn.Linear(sum([2**i for i in range(config.rnn_num_layers)]), config.rnn_num_layers)
+
     def forward(self, x_enc, x_enc_emb, x_cal_enc_emb, x_dec, x_dec_emb, x_cal_dec_emb, x_prev_day_sales_dec):
         batch_size, pred_len = x_dec.shape[0:2]
 
@@ -81,7 +84,9 @@ class Seq2Seq(nn.Module):
         predictions = torch.zeros(batch_size, pred_len, 9).to(self.config.device)
 
         encoder_output, hidden = self.encoder(x_enc, x_enc_emb, x_cal_enc_emb)
-        hidden = [torch.stack([i.mean(0) for i in hidden])]*2
+        h0 = self.fc_h0(torch.cat(hidden, 0).permute(1, 2, 0)).permute(2, 0, 1)
+        h1 = self.fc_h1(torch.cat(hidden, 0).permute(1, 2, 0)).permute(2, 0, 1)
+        hidden = [h0, h1]
 
         # for each prediction timestep, use the output of the previous step,
         # concatenated with other features as the input
@@ -104,7 +109,6 @@ class Seq2Seq(nn.Module):
             # the hidden state of the encoder will be the initialize the decoder's hidden state
             decoder_output, hidden = self.decoder(dec_input, x_dec_emb[:, timestep, :].unsqueeze(1),
                                                   x_cal_dec_emb[:, timestep, :].unsqueeze(1), hidden)
-            # print(hidden.size(), '---------')
 
             # add predictions to predictions tensor
             predictions[:, timestep] = decoder_output
