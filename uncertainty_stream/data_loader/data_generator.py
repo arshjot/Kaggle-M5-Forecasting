@@ -133,7 +133,7 @@ class DataLoader:
 
         self.X_enc_dec_feats = data_dict['X_enc_dec_feats']
         self.sell_price_l12 = self.X_enc_dec_feats[:, :, self.sell_price_i]
-        sell_price_all, _, _ = get_aggregated_series(self.X_enc_dec_feats[:, :, self.sell_price_i].T, self.ids)
+        sell_price_all, _, _ = get_aggregated_series(self.X_enc_dec_feats[:, :, self.sell_price_i].T, self.ids, 'mean')
         encodings_all, _ = get_aggregated_encodings(self.X_enc_dec_feats[:, :, 1:].transpose(1, 0, 2), self.ids)
         self.X_enc_dec_feats = np.concatenate([sell_price_all[:, :, np.newaxis], encodings_all], axis=2)\
             .transpose(1, 0, 2)

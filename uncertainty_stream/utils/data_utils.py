@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 
 
-def get_aggregated_series(sales, sales_data_ids):
+def get_aggregated_series(sales, sales_data_ids, agg_fn='sum'):
     """
     Aggregates 30,490 level 12 series to generate data for all 42,840 series
 
@@ -10,6 +10,7 @@ def get_aggregated_series(sales, sales_data_ids):
     sales: np array of shape (30490, num_timesteps)
     sales_data_ids: np array of shape (30490, 5)
                     with 'item_id', 'dept_id', 'cat_id', 'store_id', 'state_id' as the columns
+    agg_fn: function to be used for getting aggregated series' values ('mean' or 'sum')
     """
 
     df = pd.DataFrame({col: sales_data_ids[:, i] for col, i in
@@ -20,76 +21,77 @@ def get_aggregated_series(sales, sales_data_ids):
     agg_indices, agg_series, agg_series_id = [], [], []
 
     # Level 1
-    agg_series.append(sales.sum(0).reshape(1, -1))
+    agg = np.sum(sales, 0) if agg_fn == 'sum' else np.mean(sales, 0)
+    agg_series.append(agg.reshape(1, -1))
     agg_series_id.append(np.array(['Level1_Total_X']))
 
     # Level 2
     agg = df.groupby(['state_id'])[data_cols]
     agg_indices.append(agg.indices)
-    agg = agg.sum()
+    agg = agg.agg(agg_fn)
     agg_series.append(agg.values)
     agg_series_id.append(('Level2_' + agg.index.values + '_X'))
 
     # Level 3
     agg = df.groupby(['store_id'])[data_cols]
     agg_indices.append(agg.indices)
-    agg = agg.sum()
+    agg = agg.agg(agg_fn)
     agg_series.append(agg.values)
     agg_series_id.append(('Level3_' + agg.index.values + '_X'))
 
     # Level 4
     agg = df.groupby(['cat_id'])[data_cols]
     agg_indices.append(agg.indices)
-    agg = agg.sum()
+    agg = agg.agg(agg_fn)
     agg_series.append(agg.values)
     agg_series_id.append(('Level4_' + agg.index.values + '_X'))
 
     # Level 5
     agg = df.groupby(['dept_id'])[data_cols]
     agg_indices.append(agg.indices)
-    agg = agg.sum()
+    agg = agg.agg(agg_fn)
     agg_series.append(agg.values)
     agg_series_id.append(('Level5_' + agg.index.values + '_X'))
 
     # Level 6
     agg = df.groupby(['state_id', 'cat_id'])[data_cols]
     agg_indices.append(agg.indices)
-    agg = agg.sum()
+    agg = agg.agg(agg_fn)
     agg_series.append(agg.values)
     agg_series_id.append('Level6_' + agg.index.get_level_values(0) + '_' + agg.index.get_level_values(1))
 
     # Level 7
     agg = df.groupby(['state_id', 'dept_id'])[data_cols]
     agg_indices.append(agg.indices)
-    agg = agg.sum()
+    agg = agg.agg(agg_fn)
     agg_series.append(agg.values)
     agg_series_id.append('Level7_' + agg.index.get_level_values(0) + '_' + agg.index.get_level_values(1))
 
     # Level 8
     agg = df.groupby(['store_id', 'cat_id'])[data_cols]
     agg_indices.append(agg.indices)
-    agg = agg.sum()
+    agg = agg.agg(agg_fn)
     agg_series.append(agg.values)
     agg_series_id.append('Level8_' + agg.index.get_level_values(0) + '_' + agg.index.get_level_values(1))
 
     # Level 9
     agg = df.groupby(['store_id', 'dept_id'])[data_cols]
     agg_indices.append(agg.indices)
-    agg = agg.sum()
+    agg = agg.agg(agg_fn)
     agg_series.append(agg.values)
     agg_series_id.append('Level9_' + agg.index.get_level_values(0) + '_' + agg.index.get_level_values(1))
 
     # Level 10
     agg = df.groupby(['item_id'])[data_cols]
     agg_indices.append(agg.indices)
-    agg = agg.sum()
+    agg = agg.agg(agg_fn)
     agg_series.append(agg.values)
     agg_series_id.append(('Level10_' + agg.index.values + '_X'))
 
     # Level 11
     agg = df.groupby(['state_id', 'item_id'])[data_cols]
     agg_indices.append(agg.indices)
-    agg = agg.sum()
+    agg = agg.agg(agg_fn)
     agg_series.append(agg.values)
     agg_series_id.append('Level11_' + agg.index.get_level_values(0) + '_' + agg.index.get_level_values(1))
 
