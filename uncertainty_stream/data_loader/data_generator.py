@@ -39,7 +39,7 @@ class CustomDataset(data_utils.Dataset):
     """
 
     def __init__(self, X_prev_day_sales, X_enc_only_feats, X_enc_dec_feats, X_calendar, X_prev_day_sales_dec,
-                 norm_factor, Y=None, rmsse_denominator=None, wrmsse_weights=None, window_id=None):
+                 norm_factor, graph_emb, Y=None, rmsse_denominator=None, wrmsse_weights=None, window_id=None):
 
         self.X_prev_day_sales = X_prev_day_sales
         self.X_enc_only_feats = X_enc_only_feats
@@ -47,6 +47,7 @@ class CustomDataset(data_utils.Dataset):
         self.X_calendar = X_calendar
         self.X_prev_day_sales_dec = X_prev_day_sales_dec
         self.norm_factor = norm_factor
+        self.graph_emb = graph_emb
         self.window_id = window_id
 
         if Y is not None:
@@ -64,6 +65,7 @@ class CustomDataset(data_utils.Dataset):
             X_calendar = self.X_calendar[self.window_id[idx]]
             scale = self.rmsse_denominator[idx - (self.window_id[idx] * 42840)]
             weight = self.wrmsse_weights[idx - (self.window_id[idx] * 42840)]
+            graph_emb = self.graph_emb[idx - (self.window_id[idx] * 42840)].reshape(1, -1)
             ids_idx = idx - (self.window_id[idx] * 42840)
             window_id = self.window_id[idx]
         else:
@@ -71,6 +73,7 @@ class CustomDataset(data_utils.Dataset):
             if self.Y is not None:
                 scale = self.rmsse_denominator[idx]
                 weight = self.wrmsse_weights[idx]
+                graph_emb = self.graph_emb[idx].reshape(1, -1)
                 ids_idx = idx
                 window_id = 0
 
@@ -87,27 +90,25 @@ class CustomDataset(data_utils.Dataset):
         x_calendar_enc_emb = X_calendar[:enc_timesteps, -num_cal_embedding:].reshape(enc_timesteps, -1)
         # x_enc = np.concatenate([x_enc_dec_feats_enc, x_calendar_enc,
         #                         x_prev_day_sales_enc, x_enc_only_feats], axis=1)
-        x_enc = np.concatenate([x_enc_dec_feats_enc, x_calendar_enc, x_prev_day_sales_enc], axis=1)
-        x_enc_emb = self.X_enc_dec_feats[:enc_timesteps, idx, -num_embedding:].reshape(enc_timesteps, -1)
+        x_enc = np.concatenate([x_enc_dec_feats_enc, graph_emb.repeat(enc_timesteps, 0), x_calendar_enc, x_prev_day_sales_enc], axis=1)
 
         # input data for decoder
         x_enc_dec_feats_dec = self.X_enc_dec_feats[enc_timesteps:, idx, :-num_embedding].reshape(dec_timesteps, -1)
         x_calendar_dec = X_calendar[enc_timesteps:, :-num_cal_embedding]
         x_calendar_dec_emb = X_calendar[enc_timesteps:, -num_cal_embedding:].reshape(dec_timesteps, -1)
         x_prev_day_sales_dec = self.X_prev_day_sales_dec[:, idx].reshape(-1, 1)
-        x_dec = np.concatenate([x_enc_dec_feats_dec, x_calendar_dec], axis=1)
-        x_dec_emb = self.X_enc_dec_feats[enc_timesteps:, idx, -num_embedding:].reshape(dec_timesteps, -1)
+        x_dec = np.concatenate([x_enc_dec_feats_dec, graph_emb.repeat(dec_timesteps, 0), x_calendar_dec], axis=1)
 
         if self.Y is None:
-            return [[torch.from_numpy(x_enc).float(), torch.from_numpy(x_enc_emb).long(),
+            return [[torch.from_numpy(x_enc).float(),
                      torch.from_numpy(x_calendar_enc_emb).long(),
-                     torch.from_numpy(x_dec).float(), torch.from_numpy(x_dec_emb).long(),
+                     torch.from_numpy(x_dec).float(),
                      torch.from_numpy(x_calendar_dec_emb).long(),
-                     torch.from_numpy(x_prev_day_sales_dec).float()], self.norm_factor[idx]]
+                     torch.from_numpy(x_prev_day_sales_dec).float()], torch.from_numpy(self.norm_factor[idx]).float()]
 
-        return [[torch.from_numpy(x_enc).float(), torch.from_numpy(x_enc_emb).long(),
+        return [[torch.from_numpy(x_enc).float(),
                  torch.from_numpy(x_calendar_enc_emb).long(),
-                 torch.from_numpy(x_dec).float(), torch.from_numpy(x_dec_emb).long(),
+                 torch.from_numpy(x_dec).float(),
                  torch.from_numpy(x_calendar_dec_emb).long(),
                  torch.from_numpy(x_prev_day_sales_dec).float()],
                 self.Y[idx, :], torch.from_numpy(np.array(self.norm_factor[idx])).float(),
@@ -140,6 +141,8 @@ class DataLoader:
 
         self.Y_l12 = data_dict['Y']
         self.Y, _, _ = get_aggregated_series(data_dict['Y'], self.ids)
+
+        self.graph_embedding = np.fromfile('./data/m5.embeddings', np.float32).reshape(42840, 128)
 
         self.X_enc_only_feats = data_dict['X_enc_only_feats']
         self.X_calendar = data_dict['X_calendar']
@@ -253,6 +256,7 @@ class DataLoader:
                                 X_enc_dec_feats,
                                 X_calendar, X_prev_day_sales_dec,
                                 norm_factor,
+                                self.graph_embedding,
                                 Y=Y,
                                 rmsse_denominator=scales, wrmsse_weights=weights, window_id=window_id)
 
@@ -299,6 +303,7 @@ class DataLoader:
                                 X_enc_dec_feats,
                                 self.X_calendar[data_start_t:horizon_end_t], X_prev_day_sales_dec,
                                 norm_factor,
+                                self.graph_embedding,
                                 Y=self.Y[:, horizon_start_t:horizon_end_t],
                                 rmsse_denominator=np.array(rmsse_den), wrmsse_weights=weights)
 
@@ -329,7 +334,8 @@ class DataLoader:
                                 self.X_enc_only_feats[data_start_t:horizon_start_t],
                                 X_enc_dec_feats,
                                 self.X_calendar[data_start_t:horizon_end_t], X_prev_day_sales_dec,
-                                norm_factor)
+                                norm_factor,
+                                self.graph_embedding)
 
         return torch.utils.data.DataLoader(dataset=dataset, batch_size=self.config.batch_size, num_workers=3,
                                            pin_memory=True)

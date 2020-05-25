@@ -8,7 +8,9 @@ class Config:
     loss_fn = 'SPLLoss'
     metric = 'SPLMetric'
     secondary_metric = 'WRMSSEMetric'
-    architecture = 'transformer'
+    architecture = 'seq2seq_w_attention'
+
+    graph_emb_dim = 128
 
     # Running a sliding window training will help increase the training data
     sliding_window = True  # Note: sliding window has not been tested with WRMSSELoss
@@ -24,8 +26,8 @@ class Config:
     teacher_forcing_ratio = 0.0
 
     # *** Transformer *** #
-    enc_nhead = 8
-    enc_nlayers = 4
+    enc_nhead = 4
+    enc_nlayers = 2
     enc_dropout = 0.1
     dec_nhead = 4
     dec_nlayers = 2
