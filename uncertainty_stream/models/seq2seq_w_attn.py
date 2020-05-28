@@ -91,8 +91,8 @@ class Seq2Seq(nn.Module):
         batch_size, pred_len = x_dec.shape[0:2]
 
         # Ignore some initial timesteps of encoder data, according to the max_length allowed
-        x_enc, x_enc_emb = x_enc[:, :self.max_length], x_enc_emb[:, :self.max_length]
-        x_cal_enc_emb = x_cal_enc_emb[:, :self.max_length]
+        x_enc, x_enc_emb = x_enc[:, -self.max_length:], x_enc_emb[:, -self.max_length:]
+        x_cal_enc_emb = x_cal_enc_emb[:, -self.max_length:]
 
         # create a tensor to store the outputs
         predictions = torch.zeros(batch_size, pred_len, 9).to(self.config.device)
