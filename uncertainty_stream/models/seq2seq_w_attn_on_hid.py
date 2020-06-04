@@ -61,8 +61,7 @@ class AttnDecoder(nn.Module):
         self.attns = nn.ModuleList([
             nn.Linear(self.input_size + (config.rnn_num_hidden * (config.bidirectional + 1) * 2), self.max_length)
             for i in range(config.rnn_num_layers)])
-        self.attn_combine = nn.ModuleList([nn.Linear(2 * (config.rnn_num_hidden * (config.bidirectional + 1)),
-                                                     (config.rnn_num_hidden * (config.bidirectional + 1)))
+        self.attn_combine = nn.ModuleList([nn.Linear(2 * (config.rnn_num_hidden), config.rnn_num_hidden)
                                            for i in range(config.rnn_num_layers)])
 
         rnn_in_size = [self.input_size] + [config.rnn_num_hidden *
@@ -92,12 +91,12 @@ class AttnDecoder(nn.Module):
 
         dec_hidden = []
         for i, combine in enumerate(self.attn_combine):
-            dec_h_0 = torch.cat((hidden[0][i].view(-1, num_hidden), attns_applied[i][:, 0, :]), 1)
-            dec_h_1 = torch.cat((hidden[1][i].view(-1, num_hidden), attns_applied[i][:, 0, :]), 1)
-            dec_h_0 = combine(dec_h_0).unsqueeze(1).view(-1, self.config.bidirectional + 1,
-                                                         self.config.rnn_num_hidden).permute(1, 0, 2)
-            dec_h_1 = combine(dec_h_1).unsqueeze(1).view(-1, self.config.bidirectional + 1,
-                                                         self.config.rnn_num_hidden).permute(1, 0, 2)
+            dec_h_0 = torch.cat((hidden[0][i].permute(0, 2, 1),
+                                  attns_applied[i][:, 0, :].view(-1, self.config.bidirectional + 1, self.config.rnn_num_hidden)), 2)
+            dec_h_1 = torch.cat((hidden[1][i].permute(0, 2, 1),
+                                  attns_applied[i][:, 0, :].view(-1, self.config.bidirectional + 1, self.config.rnn_num_hidden)), 2)
+            dec_h_0 = combine(dec_h_0).permute(1, 0, 2).contiguous()
+            dec_h_1 = combine(dec_h_1).permute(1, 0, 2).contiguous()
 
             dec_hidden.append([dec_h_0, dec_h_1])
 
@@ -110,7 +109,7 @@ class AttnDecoder(nn.Module):
             h_1.append(h[1].permute(1, 2, 0))
 
         hidden = [torch.stack(h_0, 0), torch.stack(h_1, 0)]
-        output = self.pred(output[0])
+        output = F.relu(self.pred(output[0]))
 
         return output, hidden, attn_weights
 

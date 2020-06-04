@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.utils.data
 import random
 random.seed(0)
@@ -61,7 +62,7 @@ class Decoder(nn.Module):
         #         shape = output.size()
         #         output = self.pred(output.view(-1, output.size(2)))
         #         output = output.view(shape[0], shape[1]).permute(1, 0)
-        output = self.pred(output[0])
+        output = F.relu(self.pred(output[0]))
         return output, hidden
 
 

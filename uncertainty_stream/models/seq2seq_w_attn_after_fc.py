@@ -85,7 +85,7 @@ class AttnDecoder(nn.Module):
         x_rnn_1 = self.fc_1(x_rnn)
         x_rnn = torch.cat([x_rnn, x_rnn_1], 2).permute(1, 0, 2)
         output, hidden = self.rnn(x_rnn)
-        output = self.pred(output[0])
+        output = F.relu(self.pred(output[0]))
 
         return output, hidden, attn_weights
 
