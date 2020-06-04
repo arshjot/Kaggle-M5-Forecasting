@@ -128,7 +128,7 @@ class DataLoader:
         self.enc_dec_feat_names = data_dict['enc_dec_feat_names']
         self.sell_price_i = self.enc_dec_feat_names.index('sell_price')
 
-        self.X_prev_day_sales, _, _ = get_aggregated_series(data_dict['X_prev_day_sales'].T, self.ids)
+        self.X_prev_day_sales, self.agg_ids, _ = get_aggregated_series(data_dict['X_prev_day_sales'].T, self.ids)
         self.X_prev_day_sales = self.X_prev_day_sales.T
 
         self.X_enc_dec_feats = data_dict['X_enc_dec_feats']

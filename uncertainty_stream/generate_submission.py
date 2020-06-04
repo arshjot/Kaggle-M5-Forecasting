@@ -29,7 +29,9 @@ class SubmissionGenerator:
         print(f' Loading data '.center(self.terminal_width, '*'))
         data_loader = DataLoader(self.config)
         self.ids = data_loader.ids
+        self.agg_ids = data_loader.agg_ids
         self.test_loader = data_loader.create_test_loader()
+        self.quantiles = np.array([0.005, 0.025, 0.165, 0.25, 0.5, 0.75, 0.835, 0.975, 0.995])
 
         self.sub_dir = self._prepare_dir()
 
@@ -65,9 +67,20 @@ class SubmissionGenerator:
             norm_factor = norm_factor.to(self.config.device)
             preds.append((self.model(*x) * norm_factor[:, None, None]).data.cpu().numpy())
 
-        predictions = np.concatenate(preds, 0)
+        predictions = np.concatenate(preds, 0).transpose(2, 0, 1).reshape(-1, 28)
         sample_submission = pd.read_csv('../data/sample_submission_uncertainty.csv')
-        sample_submission.iloc[:9*predictions.shape[0], 1:] = predictions.transpose(2, 0, 1).reshape(-1, 28)
+
+        # Merge with sample_submission by using series ids
+        pred_ids = np.concatenate([[series_id[series_id.find('_') + 1:] + '_' + str(q).ljust(5, '0')
+                                    for series_id in self.agg_ids] for q in self.quantiles])
+        predictions_df = pd.DataFrame(np.hstack([pred_ids.reshape(-1, 1), predictions]),
+                                      columns=['id'] + [f'F{i + 1}' for i in range(28)])
+        sample_submission = sample_submission[['id']].merge(predictions_df, how='left',
+                                                            left_on=sample_submission.id.str[:-11], right_on='id')
+        sample_submission['id'] = sample_submission['id_x']
+        del sample_submission['id_x'], sample_submission['id_y']
+
+        # Export
         sample_submission.to_csv(f'{self.sub_dir}/submission.csv.gz', compression='gzip', index=False,
                                  float_format='%.3g')
 
