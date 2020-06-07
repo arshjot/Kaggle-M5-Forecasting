@@ -12,13 +12,15 @@ random.seed(0)
 class Encoder(nn.Module):
     def __init__(self, input_size, embedding_sizes, cal_embedding_sizes, config):
         super(Encoder, self).__init__()
+        self.config = config
         self.input_size = input_size
 
         self.embeddings = nn.ModuleList([nn.Embedding(classes, hidden_size)
                                          for classes, hidden_size in embedding_sizes])
         self.cal_embedding = nn.Embedding(cal_embedding_sizes[0], cal_embedding_sizes[1])
-        self.rnn = DRNN(self.input_size, config.rnn_num_hidden, config.rnn_num_layers,
-                        dropout=config.enc_rnn_dropout, cell_type='LSTM')
+        self.drnns = nn.ModuleList([DRNN(self.input_size, config.rnn_num_hidden, config.rnn_num_layers,
+                                         dropout=config.enc_rnn_dropout, cell_type='LSTM')
+                                    for i in range(config.bidirectional + 1)])
 
     def forward(self, x, x_emb, x_cal_emb):
         x, x_emb, x_cal_emb = x.permute(1, 0, 2), x_emb.permute(1, 0, 2), x_cal_emb.permute(1, 0, 2)  # make time-major
@@ -31,8 +33,20 @@ class Encoder(nn.Module):
 
         x_rnn = torch.cat([x, output_emb, output_emb_cal], 2)
 
-        output, hidden = self.rnn(x_rnn)
-        return output, hidden
+        rnn_input = [x_rnn, torch.flip(x_rnn, [0])] if self.config.bidirectional else [x_rnn]
+        drnn_outputs, drnn_hiddens = [], []
+        for i, drnn in enumerate(self.drnns):
+            last_output, hidden = drnn(rnn_input[i])
+            drnn_outputs.append(last_output)
+            drnn_hiddens.append(hidden)
+
+        if self.config.bidirectional:
+            drnn_hiddens = [torch.cat([drnn_hiddens[0][i], drnn_hiddens[1][i]], 0)
+                            for i in range(self.config.rnn_num_layers)]
+        else:
+            drnn_hiddens = drnn_hiddens[0]
+
+        return drnn_outputs, drnn_hiddens
 
 
 # Decoder
@@ -45,8 +59,8 @@ class Decoder(nn.Module):
                                          for classes, hidden_size in embedding_sizes])
         self.cal_embedding = nn.Embedding(cal_embedding_sizes[0], cal_embedding_sizes[1])
         self.rnn = nn.LSTM(self.input_size, config.rnn_num_hidden, config.rnn_num_layers,
-                          dropout=config.dec_rnn_dropout)
-        self.pred = nn.Linear(config.rnn_num_hidden, output_size)
+                           bidirectional=config.bidirectional, dropout=config.dec_rnn_dropout)
+        self.pred = nn.Linear(config.rnn_num_hidden * (config.bidirectional + 1), output_size)
 
     def forward(self, x, x_emb, x_cal_emb, hidden):
         x, x_emb, x_cal_emb = x.permute(1, 0, 2), x_emb.permute(1, 0, 2), x_cal_emb.permute(1, 0, 2)  # make time-major
@@ -60,10 +74,8 @@ class Decoder(nn.Module):
         x_rnn = torch.cat([x, output_emb, output_emb_cal], 2)
 
         output, hidden = self.rnn(x_rnn, hidden)
-        #         shape = output.size()
-        #         output = self.pred(output.view(-1, output.size(2)))
-        #         output = output.view(shape[0], shape[1]).permute(1, 0)
         output = F.relu(self.pred(output[0]))
+
         return output, hidden
 
 
@@ -75,8 +87,10 @@ class Seq2Seq(nn.Module):
         self.decoder = decoder
         self.config = config
 
-        self.fc_h0 = nn.Linear(sum([2**i for i in range(config.rnn_num_layers)]), config.rnn_num_layers)
-        self.fc_h1 = nn.Linear(sum([2**i for i in range(config.rnn_num_layers)]), config.rnn_num_layers)
+        self.fc_h0 = nn.Linear(sum([2**i for i in range(config.rnn_num_layers)] * (config.bidirectional + 1)),
+                               config.rnn_num_layers * (config.bidirectional + 1))
+        self.fc_h1 = nn.Linear(sum([2**i for i in range(config.rnn_num_layers)] * (config.bidirectional + 1)),
+                               config.rnn_num_layers * (config.bidirectional + 1))
 
     def forward(self, x_enc, x_enc_emb, x_cal_enc_emb, x_dec, x_dec_emb, x_cal_dec_emb, x_prev_day_sales_dec):
         batch_size, pred_len = x_dec.shape[0:2]
@@ -85,8 +99,8 @@ class Seq2Seq(nn.Module):
         predictions = torch.zeros(batch_size, pred_len, 9).to(self.config.device)
 
         encoder_output, hidden = self.encoder(x_enc, x_enc_emb, x_cal_enc_emb)
-        h0 = self.fc_h0(torch.cat(hidden, 0).permute(1, 2, 0)).permute(2, 0, 1)
-        h1 = self.fc_h1(torch.cat(hidden, 0).permute(1, 2, 0)).permute(2, 0, 1)
+        h0 = self.fc_h0(torch.cat(hidden, 0).permute(1, 2, 0)).permute(2, 0, 1).contiguous()
+        h1 = self.fc_h1(torch.cat(hidden, 0).permute(1, 2, 0)).permute(2, 0, 1).contiguous()
         hidden = [h0, h1]
 
         # for each prediction timestep, use the output of the previous step,

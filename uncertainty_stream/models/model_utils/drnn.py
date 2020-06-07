@@ -1,4 +1,5 @@
-# source: https://github.com/zalandoresearch/pytorch-dilated-rnn/blob/master/drnn.py
+# modified from source: https://github.com/zalandoresearch/pytorch-dilated-rnn/blob/master/drnn.py
+# to extract outputs from each layer
 
 import torch
 import torch.nn as nn
@@ -9,12 +10,13 @@ use_cuda = torch.cuda.is_available()
 
 class DRNN(nn.Module):
 
-    def __init__(self, n_input, n_hidden, n_layers, dropout=0, cell_type='GRU', batch_first=False):
+    def __init__(self, n_input, n_hidden, n_layers, dropout=0, cell_type='GRU', batch_first=False, layer_outputs=False):
         super(DRNN, self).__init__()
 
         self.dilations = [2 ** i for i in range(n_layers)]
         self.cell_type = cell_type
         self.batch_first = batch_first
+        self.layer_outputs = layer_outputs
 
         layers = []
         if self.cell_type == "GRU":
@@ -37,18 +39,23 @@ class DRNN(nn.Module):
     def forward(self, inputs, hidden=None):
         if self.batch_first:
             inputs = inputs.transpose(0, 1)
-        outputs = []
+        output_hiddens, output_seqs = [], []
         for i, (cell, dilation) in enumerate(zip(self.cells, self.dilations)):
             if hidden is None:
                 inputs, _ = self.drnn_layer(cell, inputs, dilation)
             else:
                 inputs, hidden[i] = self.drnn_layer(cell, inputs, dilation, hidden[i])
 
-            outputs.append(inputs[-dilation:])
+            output_hiddens.append(inputs[-dilation:])
+            output_seqs.append(inputs)
 
         if self.batch_first:
             inputs = inputs.transpose(0, 1)
-        return inputs, outputs
+
+        if self.layer_outputs:
+            return inputs, output_hiddens, output_seqs
+        else:
+            return inputs, output_hiddens
 
     def drnn_layer(self, cell, inputs, rate, hidden=None):
         n_steps = len(inputs)
