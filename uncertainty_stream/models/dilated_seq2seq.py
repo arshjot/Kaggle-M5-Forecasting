@@ -23,6 +23,7 @@ class Encoder(nn.Module):
                                     for i in range(config.bidirectional + 1)])
 
     def forward(self, x, x_emb, x_cal_emb):
+        batch_size = x.shape[0]
         x, x_emb, x_cal_emb = x.permute(1, 0, 2), x_emb.permute(1, 0, 2), x_cal_emb.permute(1, 0, 2)  # make time-major
         output_emb = [emb(x_emb[:, :, i]) for i, emb in enumerate(self.embeddings)]
         output_emb = torch.cat(output_emb, 2)
@@ -34,17 +35,20 @@ class Encoder(nn.Module):
         x_rnn = torch.cat([x, output_emb, output_emb_cal], 2)
 
         rnn_input = [x_rnn, torch.flip(x_rnn, [0])] if self.config.bidirectional else [x_rnn]
-        drnn_outputs, drnn_hiddens = [], []
+        drnn_outputs, drnn_h0, drnn_h1 = [], [], []
         for i, drnn in enumerate(self.drnns):
-            last_output, hidden = drnn(rnn_input[i])
+            last_output, [h0, h1] = drnn(rnn_input[i])
             drnn_outputs.append(last_output)
-            drnn_hiddens.append(hidden)
+            drnn_h0.append([h.view(-1, batch_size, self.config.rnn_num_hidden) for h in h0])
+            drnn_h1.append([h.view(-1, batch_size, self.config.rnn_num_hidden) for h in h1])
+        drnn_hiddens = [drnn_h0, drnn_h1]
 
         if self.config.bidirectional:
-            drnn_hiddens = [torch.cat([drnn_hiddens[0][i], drnn_hiddens[1][i]], 0)
-                            for i in range(self.config.rnn_num_layers)]
+            for j, drnn_h in enumerate(drnn_hiddens):
+                drnn_hiddens[j] = [torch.cat([drnn_h[0][i], drnn_h[1][i]], 0)
+                                   for i in range(self.config.rnn_num_layers)]
         else:
-            drnn_hiddens = drnn_hiddens[0]
+            drnn_hiddens = [drnn_hiddens[0][0], drnn_hiddens[1][0]]
 
         return drnn_outputs, drnn_hiddens
 
@@ -99,8 +103,8 @@ class Seq2Seq(nn.Module):
         predictions = torch.zeros(batch_size, pred_len, 9).to(self.config.device)
 
         encoder_output, hidden = self.encoder(x_enc, x_enc_emb, x_cal_enc_emb)
-        h0 = self.fc_h0(torch.cat(hidden, 0).permute(1, 2, 0)).permute(2, 0, 1).contiguous()
-        h1 = self.fc_h1(torch.cat(hidden, 0).permute(1, 2, 0)).permute(2, 0, 1).contiguous()
+        h0 = self.fc_h0(torch.cat(hidden[0], 0).permute(1, 2, 0)).permute(2, 0, 1).contiguous()
+        h1 = self.fc_h1(torch.cat(hidden[1], 0).permute(1, 2, 0)).permute(2, 0, 1).contiguous()
         hidden = [h0, h1]
 
         # for each prediction timestep, use the output of the previous step,

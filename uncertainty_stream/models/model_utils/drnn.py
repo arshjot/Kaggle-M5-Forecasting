@@ -1,5 +1,5 @@
 # modified from source: https://github.com/zalandoresearch/pytorch-dilated-rnn/blob/master/drnn.py
-# to extract outputs from each layer
+# to extract outputs from each layer and both hidden and cell state for LSTM
 
 import torch
 import torch.nn as nn
@@ -39,18 +39,27 @@ class DRNN(nn.Module):
     def forward(self, inputs, hidden=None):
         if self.batch_first:
             inputs = inputs.transpose(0, 1)
-        output_hiddens, output_seqs = [], []
+        output_hiddens, output_seqs, output_hiddens_lstm = [], [], [[], []]
         for i, (cell, dilation) in enumerate(zip(self.cells, self.dilations)):
             if hidden is None:
-                inputs, _ = self.drnn_layer(cell, inputs, dilation)
+                inputs, hid = self.drnn_layer(cell, inputs, dilation)
+                if self.cell_type == 'LSTM':
+                    output_hiddens_lstm[0].append(hid[0])
+                    output_hiddens_lstm[1].append(hid[1])
             else:
                 inputs, hidden[i] = self.drnn_layer(cell, inputs, dilation, hidden[i])
+                if self.cell_type == 'LSTM':
+                    output_hiddens_lstm[0].append(hidden[i][0])
+                    output_hiddens_lstm[1].append(hidden[i][1])
 
             output_hiddens.append(inputs[-dilation:])
             output_seqs.append(inputs)
 
         if self.batch_first:
             inputs = inputs.transpose(0, 1)
+
+        if self.cell_type == 'LSTM':
+            output_hiddens = output_hiddens_lstm
 
         if self.layer_outputs:
             return inputs, output_hiddens, output_seqs
