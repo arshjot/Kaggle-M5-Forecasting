@@ -33,10 +33,10 @@ class Trainer:
 
         # Loss, Optimizer and LRScheduler
         self.criterion = getattr(loss_functions, config.loss_fn)(self.config)
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.config.learning_rate)
+        self.optimizer = torch.optim.RMSprop(self.model.parameters(), lr=self.config.learning_rate, alpha=0.95)
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, factor=0.5,
-                                                                    patience=5, verbose=True)
-        self.early_stopping = EarlyStopping(patience=10)
+                                                                    patience=3, verbose=True)
+        self.early_stopping = EarlyStopping(patience=8)
         self.agg_sum = self.config.loss_fn[:3] == 'SPL'
         self.loss_agg = np.sum if self.agg_sum else np.mean
 

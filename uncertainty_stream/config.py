@@ -8,7 +8,7 @@ class Config:
     loss_fn = 'SPLLoss'
     metric = 'SPLMetric'
     secondary_metric = 'WRMSSEMetric'
-    architecture = 'seq2seq_w_attn_on_hid'
+    architecture = 'dilated_and_attn_seq2seq_ensemble'
 
     # Running a sliding window training will help increase the training data
     sliding_window = True  # Note: sliding window has not been tested with WRMSSELoss
@@ -24,16 +24,16 @@ class Config:
     teacher_forcing_ratio = 0.0
 
     # *** Transformer *** #
-    enc_nhead = 8
-    enc_nlayers = 4
+    enc_nhead = 4
+    enc_nlayers = 2
     enc_dropout = 0.1
     dec_nhead = 4
     dec_nlayers = 2
     dec_dropout = 0.1
 
     num_epochs = 200
-    batch_size = 64
-    learning_rate = 0.001
+    batch_size = 160
+    learning_rate = 0.0003
 
     # training, validation and test periods
     training_ts = {'data_start_t': 1969 - 1 - (28 * 30), 'horizon_start_t': 1969 - 1 - (28 * 4),
