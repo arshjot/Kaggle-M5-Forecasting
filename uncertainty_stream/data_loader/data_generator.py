@@ -178,9 +178,9 @@ class DataLoader:
                                                       self.ids)
                 weights.append(w_weights)
 
-                # Normalize sale features by dividing by median of each series (as per the selected input window)
+                # Normalize sale features by dividing by mean of each series (as per the selected input window)
                 w_X_prev_day_sales = self.X_prev_day_sales[w_data_start_t:w_horizon_start_t].copy().astype(float)
-                w_norm_factor = np.median(w_X_prev_day_sales, 0)
+                w_norm_factor = np.mean(w_X_prev_day_sales, 0)
                 w_norm_factor[w_norm_factor == 0] = 1.
                 w_X_prev_day_sales = w_X_prev_day_sales / w_norm_factor
                 w_X_prev_day_sales_dec = self.X_prev_day_sales[w_horizon_start_t:w_horizon_end_t]\
@@ -228,9 +228,9 @@ class DataLoader:
                                                 self.sell_price_l12[horizon_start_t - 28:horizon_start_t, :].T,
                                                 self.ids)
 
-            # Normalize sale features by dividing by median of each series (as per the selected input window)
+            # Normalize sale features by dividing by mean of each series (as per the selected input window)
             X_prev_day_sales = self.X_prev_day_sales[data_start_t:horizon_start_t].copy().astype(float)
-            norm_factor = np.median(X_prev_day_sales, 0)
+            norm_factor = np.mean(X_prev_day_sales, 0)
             norm_factor[norm_factor == 0] = 1.
             X_prev_day_sales = X_prev_day_sales / norm_factor
             X_prev_day_sales_dec = self.X_prev_day_sales[horizon_start_t:horizon_end_t]\
@@ -280,9 +280,9 @@ class DataLoader:
                                             self.sell_price_l12[horizon_start_t-28:horizon_start_t, :].T,
                                             self.ids)
 
-        # Normalize sale features by dividing by median of each series (as per the selected input window)
+        # Normalize sale features by dividing by mean of each series (as per the selected input window)
         X_prev_day_sales = self.X_prev_day_sales[data_start_t:horizon_start_t].copy().astype(float)
-        norm_factor = np.median(X_prev_day_sales, 0)
+        norm_factor = np.mean(X_prev_day_sales, 0)
         norm_factor[norm_factor == 0] = 1.
         X_prev_day_sales = X_prev_day_sales / norm_factor
         X_prev_day_sales_dec = self.X_prev_day_sales[horizon_start_t:horizon_end_t] \
@@ -311,9 +311,9 @@ class DataLoader:
             horizon_start_t = self.config.test_ts['horizon_start_t']
             horizon_end_t = self.config.test_ts['horizon_end_t']
 
-        # Normalize sale features by dividing by median of each series (as per the selected input window)
+        # Normalize sale features by dividing by mean of each series (as per the selected input window)
         X_prev_day_sales = self.X_prev_day_sales[data_start_t:horizon_start_t].copy().astype(float)
-        norm_factor = np.median(X_prev_day_sales, 0)
+        norm_factor = np.mean(X_prev_day_sales, 0)
         norm_factor[norm_factor == 0] = 1.
         X_prev_day_sales = X_prev_day_sales / norm_factor
         X_prev_day_sales_dec = self.X_prev_day_sales[horizon_start_t:horizon_end_t] \
