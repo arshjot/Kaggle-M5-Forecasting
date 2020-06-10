@@ -77,7 +77,10 @@ class DRNN(nn.Module):
         if hidden is None:
             dilated_outputs, hidden = self._apply_cell(dilated_inputs, cell, batch_size, rate, hidden_size)
         else:
-            hidden = self._prepare_inputs(hidden, rate)
+            if self.cell_type == 'LSTM':
+                hidden = self._prepare_inputs(hidden, rate, multiple_hidden=True)
+            else:
+                hidden = self._prepare_inputs(hidden, rate)
             dilated_outputs, hidden = self._apply_cell(dilated_inputs, cell, batch_size, rate, hidden_size, hidden=hidden)
 
         splitted_outputs = self._split_outputs(dilated_outputs, rate)
@@ -129,8 +132,11 @@ class DRNN(nn.Module):
 
         return inputs, dilated_steps
 
-    def _prepare_inputs(self, inputs, rate):
-        dilated_inputs = torch.cat([inputs[j::rate, :, :] for j in range(rate)], 1)
+    def _prepare_inputs(self, inputs, rate, multiple_hidden=False):
+        if multiple_hidden:
+            dilated_inputs = [torch.cat([inp[j::rate, :, :] for j in range(rate)], 1) for inp in inputs]
+        else:
+            dilated_inputs = torch.cat([inputs[j::rate, :, :] for j in range(rate)], 1)
         return dilated_inputs
 
     def init_hidden(self, batch_size, hidden_dim):

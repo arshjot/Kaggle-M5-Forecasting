@@ -8,7 +8,7 @@ class Config:
     loss_fn = 'SPLLoss'
     metric = 'SPLMetric'
     secondary_metric = 'WRMSSEMetric'
-    architecture = 'dilated_and_attn_seq2seq_ensemble'
+    architecture = 'dilated_seq2seq'
 
     # Running a sliding window training will help increase the training data
     sliding_window = True  # Note: sliding window has not been tested with WRMSSELoss

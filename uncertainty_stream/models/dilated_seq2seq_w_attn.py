@@ -54,7 +54,7 @@ class Encoder(nn.Module):
 
         if self.config.bidirectional:
             for j, drnn_h in enumerate(drnn_hiddens):
-                drnn_hiddens[j] = [torch.stack([drnn_h[0][i], drnn_h[1][i]], 3)
+                drnn_hiddens[j] = [torch.cat([drnn_h[0][i], drnn_h[1][i]], 0)
                                    for i in range(self.config.rnn_num_layers)]
             drnn_outputs = [torch.cat([drnn_outputs[0][i], drnn_outputs[1][i]], 2)
                             for i in range(self.config.rnn_num_layers)]
@@ -62,7 +62,7 @@ class Encoder(nn.Module):
             drnn_hiddens = [drnn_hiddens[0][0], drnn_hiddens[1][0]]
             drnn_outputs = drnn_outputs[0]
 
-        return drnn_outputs, drnn_hiddens
+        return drnn_outputs[-1], drnn_hiddens
 
 
 # Attention Decoder
@@ -74,49 +74,22 @@ class AttnDecoder(nn.Module):
         self.max_length = config.window_length if config.sliding_window \
             else config.training_ts['horizon_start_t'] - config.training_ts['data_start_t']
 
-        self.attns = nn.ModuleList([
-            nn.Linear(self.input_size + (config.rnn_num_hidden * (config.bidirectional + 1) * 2), self.max_length)
-            for i in range(config.rnn_num_layers)])
-        self.attn_combine = nn.ModuleList([nn.Linear(2 * config.rnn_num_hidden, config.rnn_num_hidden)
-                                           for i in range(config.rnn_num_layers)])
-
-        rnn_in_size = [self.input_size] + [config.rnn_num_hidden *
-                                           (config.bidirectional + 1)] * (config.rnn_num_layers - 1)
-        self.rnns = nn.ModuleList([nn.LSTM(rnn_in_size[i], config.rnn_num_hidden, 1, bidirectional=config.bidirectional)
-                                   for i in range(config.rnn_num_layers)])
-        self.rnn_dropouts = nn.ModuleList([nn.Dropout(config.dec_rnn_dropout) for i in range(config.rnn_num_layers-1)])
+        self.attn = nn.Linear(self.input_size + (config.rnn_num_hidden * 2), self.max_length)
+        self.attn_combine = nn.Linear(self.input_size + (config.rnn_num_hidden * (config.bidirectional + 1)),
+                                      self.input_size)
+        self.rnn = nn.LSTM(self.input_size, config.rnn_num_hidden,
+                           config.rnn_num_layers, dropout=config.dec_rnn_dropout, bidirectional=config.bidirectional)
         self.pred = nn.Linear(config.rnn_num_hidden * (config.bidirectional + 1), output_size)
 
     def forward(self, x_rnn, hidden, encoder_outputs):
-        output = x_rnn
+        attn_weights = F.softmax(
+            self.attn(torch.cat((x_rnn[0], hidden[0][0], hidden[1][0]), 1)), dim=1)
+        attn_applied = torch.bmm(attn_weights.unsqueeze(1), encoder_outputs.permute(1, 0, 2))
 
-        num_hidden = self.config.rnn_num_hidden * (self.config.bidirectional + 1)
-        attn_weights = [F.softmax(attn(torch.cat((output[0], hidden[0][i].view(-1, num_hidden),
-                                                  hidden[1][i].view(-1, num_hidden)), 1)), dim=1)
-                        for i, attn in enumerate(self.attns)]
-        attns_applied = [torch.bmm(attn_w.unsqueeze(1), encoder_outputs[i].permute(1, 0, 2))
-                         for i, attn_w in enumerate(attn_weights)]
+        output = torch.cat((x_rnn[0], attn_applied[:, 0, :]), 1)
+        output = self.attn_combine(output).unsqueeze(0)
 
-        dec_hidden = []
-        for i, combine in enumerate(self.attn_combine):
-            dec_h_0 = torch.cat((hidden[0][i].permute(0, 2, 1),
-                                  attns_applied[i][:, 0, :].view(-1, self.config.bidirectional + 1, self.config.rnn_num_hidden)), 2)
-            dec_h_1 = torch.cat((hidden[1][i].permute(0, 2, 1),
-                                  attns_applied[i][:, 0, :].view(-1, self.config.bidirectional + 1, self.config.rnn_num_hidden)), 2)
-            dec_h_0 = combine(dec_h_0).permute(1, 0, 2).contiguous()
-            dec_h_1 = combine(dec_h_1).permute(1, 0, 2).contiguous()
-
-            dec_hidden.append([dec_h_0, dec_h_1])
-
-        h_0, h_1 = [], []
-        for i, rnn in enumerate(self.rnns):
-            if i != 0:
-                output = self.rnn_dropouts[i - 1](output)
-            output, h = rnn(output, dec_hidden[i])
-            h_0.append(h[0].permute(1, 2, 0))
-            h_1.append(h[1].permute(1, 2, 0))
-
-        hidden = [torch.stack(h_0, 0), torch.stack(h_1, 0)]
+        output, hidden = self.rnn(output, hidden)
         output = F.relu(self.pred(output[0]))
 
         return output, hidden, attn_weights
@@ -133,10 +106,10 @@ class Seq2Seq(nn.Module):
         self.max_length = config.window_length if config.sliding_window \
             else config.training_ts['horizon_start_t'] - config.training_ts['data_start_t']
 
-        self.fc_h0 = nn.Linear(sum([2 ** i for i in range(config.rnn_num_layers)]),
-                               config.rnn_num_layers)
-        self.fc_h1 = nn.Linear(sum([2 ** i for i in range(config.rnn_num_layers)]),
-                               config.rnn_num_layers)
+        self.fc_h0 = nn.Linear(sum([2**i for i in range(config.rnn_num_layers)] * (config.bidirectional + 1)),
+                               config.rnn_num_layers * (config.bidirectional + 1))
+        self.fc_h1 = nn.Linear(sum([2**i for i in range(config.rnn_num_layers)] * (config.bidirectional + 1)),
+                               config.rnn_num_layers * (config.bidirectional + 1))
 
     def forward(self, x_enc, x_enc_emb, x_cal_enc_emb, x_dec, x_dec_emb, x_cal_dec_emb, x_prev_day_sales_dec):
         batch_size, pred_len = x_dec.shape[0:2]
@@ -151,9 +124,8 @@ class Seq2Seq(nn.Module):
         # Prepare inputs and send to encoder
         rnn_input = self.embedder(x_enc, x_enc_emb, x_cal_enc_emb)
         encoder_output, hidden = self.encoder(rnn_input)
-
-        h0 = self.fc_h0(torch.cat(hidden[0], 0).permute(1, 2, 3, 0)).permute(3, 0, 1, 2).contiguous()
-        h1 = self.fc_h1(torch.cat(hidden[1], 0).permute(1, 2, 3, 0)).permute(3, 0, 1, 2).contiguous()
+        h0 = self.fc_h0(torch.cat(hidden[0], 0).permute(1, 2, 0)).permute(2, 0, 1).contiguous()
+        h1 = self.fc_h1(torch.cat(hidden[1], 0).permute(1, 2, 0)).permute(2, 0, 1).contiguous()
         hidden = [h0, h1]
 
         # for each prediction timestep, use the output of the previous step,
