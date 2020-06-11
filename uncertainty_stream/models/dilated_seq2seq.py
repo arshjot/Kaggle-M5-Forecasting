@@ -71,7 +71,7 @@ class Decoder(nn.Module):
 
         self.rnn = nn.LSTM(self.input_size, config.rnn_num_hidden, config.rnn_num_layers,
                            bidirectional=config.bidirectional, dropout=config.dec_rnn_dropout)
-        self.dropout = nn.Dropout(0.2)
+        self.dropout = nn.Dropout(0.0)
         self.pred = nn.Linear(config.rnn_num_hidden * (config.bidirectional + 1), output_size)
 
     def forward(self, x_rnn, hidden):

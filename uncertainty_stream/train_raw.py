@@ -6,11 +6,11 @@ import shutil
 import glob
 import os
 
-from data_loader.data_generator import DataLoader
+from data_loader.data_generator_raw import DataLoader
 from utils.data_utils import *
 from utils.training_utils import ModelCheckpoint, EarlyStopping
 from losses_and_metrics import loss_functions, metrics
-from config import Config
+from config import *
 
 seed = 0
 torch.manual_seed(seed)
@@ -53,7 +53,7 @@ class Trainer:
 
         self.start_epoch, self.min_val_error = 1, None
         # Load checkpoint if training is to be resumed
-        self.model_checkpoint = ModelCheckpoint()
+        self.model_checkpoint = ModelCheckpoint(weight_dir='./weights/raw/')
         if config.resume_training:
             self.model, self.optimizer, self.scheduler, [self.start_epoch, self.min_val_error, num_bad_epochs] = \
                 self.model_checkpoint.load(self.model, self.optimizer, self.scheduler)

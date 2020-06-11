@@ -45,3 +45,16 @@ class Config:
 
     data_file = '../accuracy_stream/data/data.pickle'
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    # xxxxxxxxxxxxxx --- Representation Model --- xxxxxxxxxxxxxx #
+    rs_loss_fn = 'MSELoss'
+    rs_architecture = 'rs_seq2seq'
+
+    rs_num_epochs = 200
+    rs_batch_size = 160
+    rs_learning_rate = 0.0008
+
+    # *** RNN *** #
+    rs_rnn_num_hidden = [512, 256, 512]
+    rs_bidirectional = True
+    rs_rnn_dropout = [0.2, 0.1, 0.2]

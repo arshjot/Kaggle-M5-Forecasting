@@ -1,15 +1,13 @@
-import torch
 from tqdm import tqdm
-import numpy as np
-import pandas as pd
 from importlib import import_module
 import os
 import shutil
 
-from data_loader.data_generator import DataLoader
+from data_loader.data_generator_raw import DataLoader
 from utils.training_utils import ModelCheckpoint
 from utils.data_utils import *
-from config import Config
+
+from config import *
 
 
 class SubmissionGenerator:
@@ -23,7 +21,7 @@ class SubmissionGenerator:
         create_model = getattr(model_type, 'create_model')
         self.model = create_model(self.config)
         print(self.model)
-        model_checkpoint = ModelCheckpoint()
+        model_checkpoint = ModelCheckpoint(weight_dir='./weights/raw/')
         self.model, _, _, _ = model_checkpoint.load(self.model, load_best=True)
 
         print(f' Loading data '.center(self.terminal_width, '*'))
@@ -54,7 +52,7 @@ class SubmissionGenerator:
         shutil.copyfile('./data/prepare_data.py', f'./submissions/sub{sub_idx}/data/prepare_data.py')
         shutil.copyfile('config.py', f'./submissions/sub{sub_idx}/config.py')
         shutil.copyfile('generate_submission.py', f'./submissions/sub{sub_idx}/generate_submission.py')
-        shutil.copyfile('train.py', f'./submissions/sub{sub_idx}/train.py')
+        shutil.copyfile('train_raw.py', f'./submissions/sub{sub_idx}/train_raw.py')
 
         return f'./submissions/sub{sub_idx}/'
 

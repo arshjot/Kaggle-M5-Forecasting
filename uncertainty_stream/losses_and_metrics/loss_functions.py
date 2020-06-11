@@ -8,7 +8,7 @@ class MSELoss(nn.Module):
         super().__init__()
         self.mse = nn.MSELoss(reduction='none')
 
-    def forward(self, yhat, y, scale, weight):
+    def forward(self, yhat, y, scale=None, weight=None):
         loss = torch.mean(
             self.mse(yhat, y).mean(1))
         return loss
