@@ -28,11 +28,13 @@ class DRNN(nn.Module):
         else:
             raise NotImplementedError
 
+        self.rnn_dropouts = nn.ModuleList([nn.Dropout(dropout) for i in range(n_layers - 1)])
+
         for i in range(n_layers):
             if i == 0:
-                c = cell(n_input, n_hidden, dropout=dropout)
+                c = cell(n_input, n_hidden)
             else:
-                c = cell(n_hidden, n_hidden, dropout=dropout)
+                c = cell(n_hidden, n_hidden)
             layers.append(c)
         self.cells = nn.Sequential(*layers)
 
@@ -41,6 +43,8 @@ class DRNN(nn.Module):
             inputs = inputs.transpose(0, 1)
         output_hiddens, output_seqs, output_hiddens_lstm = [], [], [[], []]
         for i, (cell, dilation) in enumerate(zip(self.cells, self.dilations)):
+            if i != 0:
+                inputs = self.rnn_dropouts[i - 1](inputs)
             if hidden is None:
                 inputs, hid = self.drnn_layer(cell, inputs, dilation)
                 if self.cell_type == 'LSTM':
