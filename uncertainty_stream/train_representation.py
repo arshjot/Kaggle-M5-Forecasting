@@ -23,19 +23,6 @@ class Trainer:
         self.config = config
         self.terminal_width = shutil.get_terminal_size((80, 20)).columns
 
-        # Load model trained on raw data to extract weight for embeddings
-        model_type = import_module('models.' + config.architecture)
-        create_model = getattr(model_type, 'create_model')
-        model_raw = create_model(config)
-        model_checkpoint = ModelCheckpoint(weight_dir='./weights/raw/')
-        model_raw, _, _, _ = model_checkpoint.load(model_raw, load_best=True)
-        self.model_embedder = model_raw.embedder
-
-        # Freeze weights for pre-trained Embedder module
-        for param in self.model_embedder.parameters():
-            param.requires_grad = False
-        self.model_embedder.eval()
-
         # Initialize representation model
         print(f' Model: {self.config.rs_architecture} '.center(self.terminal_width, '*'))
         model_type = import_module('models.' + self.config.rs_architecture)
@@ -53,7 +40,8 @@ class Trainer:
         print(f' Loading data '.center(self.terminal_width, '*'))
         data_loader = DataLoader(self.config)
         self.ids = data_loader.ids
-        self.train_loader, self.val_loader = data_loader.create_train_val_loaders()
+        self.train_loader = data_loader.create_train_loader()
+        self.val_loader = data_loader.create_val_loader()
         self.n_windows = data_loader.n_windows
 
         self.start_epoch, self.min_val_error = 1, None
@@ -79,14 +67,12 @@ class Trainer:
         progbar = tqdm(self.val_loader)
         progbar.set_description("             ")
         losses = []
-        for i, x in enumerate(progbar):
+        for i, [x, w] in enumerate(progbar):
             x = [inp.to(self.config.device) for inp in x]
 
-            # Pass x through pre-trained Embedder to obtain inputs for autoencoder
-            x_autoenc = self.model_embedder(*x).permute(1, 0, 2)
+            y, preds = self.model(*x)
 
-            preds = self.model(x_autoenc)
-            loss = self.criterion(preds, x_autoenc)
+            loss = self.criterion(preds.permute(1, 0, 2), y.permute(1, 0, 2))
             losses.append(loss.data.cpu().numpy())
 
         return np.mean(losses)
@@ -99,17 +85,14 @@ class Trainer:
             self.model.train()
             progbar = tqdm(self.train_loader)
             losses = []
-            for i, x in enumerate(progbar):
+            for i, [x, w] in enumerate(progbar):
                 x = [inp.to(self.config.device) for inp in x]
-
-                # Pass x through pre-trained Embedder to obtain inputs for autoencoder
-                x_autoenc = self.model_embedder(*x).permute(1, 0, 2)
 
                 # Forward + Backward + Optimize
                 self.optimizer.zero_grad()
-                preds = self.model(x_autoenc)
+                y, preds = self.model(*x)
 
-                loss = self.criterion(preds, x_autoenc)
+                loss = self.criterion(preds.permute(1, 0, 2), y.permute(1, 0, 2))
                 losses.append(loss.data.cpu().numpy())
                 progbar.set_description("loss = %0.3f " % np.round(np.mean(losses), 3))
 

@@ -1,9 +1,7 @@
-import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import torch.utils.data
 import random
-from models.model_utils.drnn import DRNN
+from importlib import import_module
+from utils.training_utils import ModelCheckpoint
 random.seed(0)
 
 
@@ -25,8 +23,6 @@ class Autoencoder(nn.Module):
         self.adaptor = nn.Linear(rnn_in_size[0] * (config.rs_bidirectional + 1), rnn_in_size[0])
 
     def forward(self, x_rnn):
-        x_rnn = x_rnn.permute(1, 0, 2)
-
         for i, rnn in enumerate(self.rnns):
             if i != 0:
                 x_rnn = self.rnn_dropouts[i - 1](x_rnn)
@@ -34,7 +30,23 @@ class Autoencoder(nn.Module):
 
         output = self.adaptor(x_rnn.permute(1, 0, 2))
 
-        return output
+        return output.permute(1, 0, 2)
+
+
+class Raw2Representation(nn.Module):
+    def __init__(self, embedder, autoencoder, config):
+        super().__init__()
+
+        self.embedder = embedder
+        self.autoencoder = autoencoder
+        self.config = config
+
+    def forward(self, x, x_emb, x_cal_emb):
+        # Prepare inputs and send to autoencoder
+        rnn_input = self.embedder(x, x_emb, x_cal_emb)
+        rnn_output = self.autoencoder(rnn_input)
+
+        return rnn_input, rnn_output
 
 
 def create_model(config):
@@ -42,7 +54,22 @@ def create_model(config):
     embedding_sizes = [(3049 + 1, 50), (7 + 1, 4), (3 + 1, 2), (10 + 1, 5), (3 + 1, 2)]
     cal_embedding_sizes = (31, 16)
     num_features = 12 + sum([j for i, j in embedding_sizes]) + cal_embedding_sizes[1] * 2
-    model = Autoencoder(num_features, config)
+
+    # Load model trained on raw data to extract weight for embeddings
+    model_type = import_module('models.' + config.architecture)
+    create_model_raw = getattr(model_type, 'create_model')
+    model_raw = create_model_raw(config)
+    model_checkpoint = ModelCheckpoint(weight_dir='./weights/raw/')
+    model_raw, _, _, _ = model_checkpoint.load(model_raw, load_best=True)
+    model_embedder = model_raw.embedder
+
+    # Freeze the weights for pre-trained Embedder module
+    for param in model_embedder.parameters():
+        param.requires_grad = False
+    model_embedder.eval()
+
+    autoenc = Autoencoder(num_features, config)
+    model = Raw2Representation(model_embedder, autoenc, config)
     model.to(config.device)
 
     return model
