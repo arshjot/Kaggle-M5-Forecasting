@@ -68,7 +68,6 @@ class Decoder(nn.Module):
     def __init__(self, input_size, output_size, config):
         super(Decoder, self).__init__()
         self.input_size = input_size
-        self.output_size = output_size
 
         self.rnn = nn.LSTM(self.input_size, config.rnn_num_hidden, config.rnn_num_layers,
                            bidirectional=config.bidirectional, dropout=config.dec_rnn_dropout)
@@ -76,10 +75,10 @@ class Decoder(nn.Module):
         self.pred = nn.Linear(config.rnn_num_hidden * (config.bidirectional + 1), output_size)
 
     def forward(self, x_rnn, hidden):
-        rnn_output, hidden = self.rnn(x_rnn, hidden)
-        output = F.relu(self.pred(self.dropout(rnn_output[0])))
+        output, hidden = self.rnn(x_rnn, hidden)
+        output = F.relu(self.pred(self.dropout(output[0])))
 
-        return output, hidden, rnn_output[0]
+        return output, hidden
 
 
 class Seq2Seq(nn.Module):
@@ -95,22 +94,19 @@ class Seq2Seq(nn.Module):
                                config.rnn_num_layers * (config.bidirectional + 1))
         self.fc_h1 = nn.Linear(sum([2**i for i in range(config.rnn_num_layers)] * (config.bidirectional + 1)),
                                config.rnn_num_layers * (config.bidirectional + 1))
-        self.adaptor = nn.Linear(config.rnn_num_hidden * (config.bidirectional + 1) * 2, decoder.output_size)
 
     def forward(self, x_enc, x_enc_emb, x_cal_enc_emb, x_dec, x_dec_emb, x_cal_dec_emb, x_prev_day_sales_dec):
         batch_size, pred_len = x_dec.shape[0:2]
 
         # create a tensor to store the outputs
-        predictions = torch.zeros(batch_size, pred_len, 9, self.config.bidirectional + 1).to(self.config.device)
-        rnn_outputs = torch.zeros(batch_size, pred_len, self.config.rnn_num_hidden * (self.config.bidirectional + 1),
-                                  self.config.bidirectional + 1).to(self.config.device)
+        predictions = torch.zeros(batch_size, pred_len, 9).to(self.config.device)
 
         # Prepare inputs and send to encoder
         rnn_input = self.embedder(x_enc, x_enc_emb, x_cal_enc_emb)
         encoder_output, hidden = self.encoder(rnn_input)
         h0 = self.fc_h0(torch.cat(hidden[0], 0).permute(1, 2, 0)).permute(2, 0, 1).contiguous()
         h1 = self.fc_h1(torch.cat(hidden[1], 0).permute(1, 2, 0)).permute(2, 0, 1).contiguous()
-        enc_hidden = [h0, h1]
+        hidden = [h0, h1]
 
         # for each prediction timestep, use the output of the previous step,
         # concatenated with other features as the input
@@ -118,35 +114,27 @@ class Seq2Seq(nn.Module):
         # enable teacher forcing only if model is in training phase
         use_teacher_forcing = True if (random.random() < self.config.teacher_forcing_ratio) & self.training else False
 
-        for direction in range(self.config.bidirectional + 1):
-            hidden = enc_hidden
-            prev_day_sales_t0 = x_prev_day_sales_dec[:, 0] if direction == 0 else predictions[:, -2, 4, 0].unsqueeze(1)
-            timestep_array = list(range(0, pred_len)) if direction == 0 else list(range(0, pred_len))[::-1]
+        for timestep in range(0, pred_len):
 
-            for idx, timestep in enumerate(timestep_array):
-                if idx == 0:
-                    # for the first timestep of decoder, use previous steps' sales
-                    dec_input = torch.cat([x_dec[:, timestep, :], prev_day_sales_t0], dim=1).unsqueeze(1)
+            if timestep == 0:
+                # for the first timestep of decoder, use previous steps' sales
+                dec_input = torch.cat([x_dec[:, 0, :], x_prev_day_sales_dec[:, 0]], dim=1).unsqueeze(1)
+            else:
+                if use_teacher_forcing:
+                    dec_input = torch.cat([x_dec[:, timestep, :], x_prev_day_sales_dec[:, timestep]], dim=1).unsqueeze(1)
                 else:
-                    if use_teacher_forcing:
-                        dec_input = torch.cat([x_dec[:, timestep, :], x_prev_day_sales_dec[:, timestep]], dim=1)\
-                            .unsqueeze(1)
-                    else:
-                        # for next timestep, current timestep's output will serve as the input along with other features
-                        dec_input = torch.cat([x_dec[:, timestep, :], decoder_output[:, 4].unsqueeze(1)], dim=1)\
-                            .unsqueeze(1)
+                    # for next timestep, current timestep's output will serve as the input along with other features
+                    dec_input = torch.cat([x_dec[:, timestep, :], decoder_output[:, 4].unsqueeze(1)], dim=1).unsqueeze(1)
 
-                # Prepare inputs and send to decoder
-                # the hidden state of the encoder will be the initialize the decoder's hidden state
-                rnn_input = self.embedder(dec_input, x_dec_emb[:, timestep, :].unsqueeze(1),
-                                          x_cal_dec_emb[:, timestep, :].unsqueeze(1))
-                decoder_output, hidden, rnn_out_t = self.decoder(rnn_input, hidden)
+            # Prepare inputs and send to decoder
+            # the hidden state of the encoder will be the initialize the decoder's hidden state
+            rnn_input = self.embedder(dec_input, x_dec_emb[:, timestep, :].unsqueeze(1),
+                                      x_cal_dec_emb[:, timestep, :].unsqueeze(1))
+            decoder_output, hidden = self.decoder(rnn_input, hidden)
 
-                # add predictions to predictions tensor
-                predictions[:, timestep, :, direction] = decoder_output
-                rnn_outputs[:, timestep, :, direction] = rnn_out_t
+            # add predictions to predictions tensor
+            predictions[:, timestep] = decoder_output
 
-        predictions = F.relu(self.adaptor(rnn_outputs.view(batch_size, pred_len, -1)))
         return predictions
 
 
