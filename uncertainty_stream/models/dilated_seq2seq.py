@@ -96,11 +96,14 @@ class Seq2Seq(nn.Module):
         self.fc_h1 = nn.Linear(sum([2**i for i in range(config.rnn_num_layers)] * (config.bidirectional + 1)),
                                config.rnn_num_layers * (config.bidirectional + 1))
 
-    def forward(self, x_enc, x_enc_emb, x_cal_enc_emb, x_dec, x_dec_emb, x_cal_dec_emb, x_prev_day_sales_dec):
+    def forward(self, x_enc, x_enc_emb, x_cal_enc_emb, x_dec, x_dec_emb, x_cal_dec_emb, x_sales_feats_dec):
         batch_size, pred_len = x_dec.shape[0:2]
 
         # create a tensor to store the outputs
         predictions = torch.zeros(batch_size, pred_len, 9).to(self.config.device)
+
+        # Tensor for calculating rolling features for each decoder timestep
+        prev_sales = x_enc[:, :, 11]
 
         encoder_output, hidden = self.encoder(x_enc, x_enc_emb, x_cal_enc_emb)
         h0 = self.fc_h0(torch.cat(hidden[0], 0).permute(1, 2, 0)).permute(2, 0, 1).contiguous()
@@ -117,13 +120,27 @@ class Seq2Seq(nn.Module):
 
             if timestep == 0:
                 # for the first timestep of decoder, use previous steps' sales
-                dec_input = torch.cat([x_dec[:, 0, :], x_prev_day_sales_dec[:, 0]], dim=1).unsqueeze(1)
+                dec_input = torch.cat([x_dec[:, 0, :], x_sales_feats_dec[:, 0]], dim=1).unsqueeze(1)
+                prev_sales = torch.cat([prev_sales, x_sales_feats_dec[:, 0, 0].unsqueeze(1)], 1)
             else:
                 if use_teacher_forcing:
-                    dec_input = torch.cat([x_dec[:, timestep, :], x_prev_day_sales_dec[:, timestep]], dim=1).unsqueeze(1)
+                    dec_input = torch.cat([x_dec[:, timestep, :], x_sales_feats_dec[:, timestep],
+                                           x_sales_feats_dec[:, timestep, 1:]], dim=1).unsqueeze(1)
+                    prev_sales = torch.cat([prev_sales, x_sales_feats_dec[:, timestep, 0].unsqueeze(1)], 1)
                 else:
                     # for next timestep, current timestep's output will serve as the input along with other features
-                    dec_input = torch.cat([x_dec[:, timestep, :], decoder_output[:, 4].unsqueeze(1)], dim=1).unsqueeze(1)
+                    dec_input = torch.cat([x_dec[:, timestep, :], decoder_output[:, 4].unsqueeze(1),
+                                           x_sales_feats_dec[:, timestep, 1:]], dim=1).unsqueeze(1)
+                    prev_sales = torch.cat([prev_sales, decoder_output[:, 4].unsqueeze(1)], 1)
+
+            # Create rolling features, if required
+            if self.config.lag_and_roll_feats:
+                rolling_feats = torch.zeros(batch_size, 1, len(self.config.rolling) * 2)
+                for roll_idx, roll_i in enumerate(self.config.rolling):
+                    roll_i_feat = prev_sales[:, -roll_i:]
+                    rolling_feats[:, 0, roll_idx * 2] = roll_i_feat.mean()
+                    rolling_feats[:, 0, 1 + (roll_idx * 2)] = roll_i_feat.std()
+                dec_input = torch.cat([dec_input, rolling_feats], 2)
 
             # the hidden state of the encoder will be the initialize the decoder's hidden state
             decoder_output, hidden = self.decoder(dec_input, x_dec_emb[:, timestep, :].unsqueeze(1),
@@ -139,8 +156,11 @@ def create_model(config):
     # for item_id, dept_id, cat_id, store_id, state_id respectively
     embedding_sizes = [(3049 + 1, 50), (7 + 1, 4), (3 + 1, 2), (10 + 1, 5), (3 + 1, 2)]
     cal_embedding_sizes = (31, 16)
-    num_features_enc = 12 + sum([j for i, j in embedding_sizes]) + cal_embedding_sizes[1] * 2
-    num_features_dec = 12 + sum([j for i, j in embedding_sizes]) + cal_embedding_sizes[1] * 2
+
+    num_lag_roll_feats = len(config.lags) + (len(config.rolling) * 2) if config.lag_and_roll_feats else 0
+    num_features_enc = 12 + sum([j for i, j in embedding_sizes]) + cal_embedding_sizes[1] * 2 + num_lag_roll_feats
+    num_features_dec = 12 + sum([j for i, j in embedding_sizes]) + cal_embedding_sizes[1] * 2 + num_lag_roll_feats
+
     enc = Encoder(num_features_enc, embedding_sizes, cal_embedding_sizes, config)
     dec = Decoder(num_features_dec, embedding_sizes, cal_embedding_sizes, 9, config)
     model = Seq2Seq(enc, dec, config)

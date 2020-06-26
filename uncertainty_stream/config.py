@@ -8,11 +8,15 @@ class Config:
     loss_fn = 'SPLLoss'
     metric = 'SPLMetric'
     secondary_metric = 'WRMSSEMetric'
-    architecture = 'dilated_and_attn_seq2seq_ensemble'
+    architecture = 'dilated_seq2seq'
 
     # Running a sliding window training will help increase the training data
     sliding_window = True  # Note: sliding window has not been tested with WRMSSELoss
     window_length = 28 * 13
+
+    lag_and_roll_feats = True  # Note: Currently only works with dilated_seq2seq architecture
+    lags = list(range(27, 42))  # Do not put lags < 27 - currently not compatible with seq2seq decoder code
+    rolling = [7, 14, 30, 60]
 
     # *** RNN *** #
     # hidden dimension and no. of layers will be the same for both encoder and decoder
@@ -36,7 +40,7 @@ class Config:
     learning_rate = 0.0003
 
     # training, validation and test periods
-    training_ts = {'data_start_t': 1969 - 1 - (28 * 30), 'horizon_start_t': 1969 - 1 - (28 * 4),
+    training_ts = {'data_start_t': 1969 - 1 - (28 * 29), 'horizon_start_t': 1969 - 1 - (28 * 4),
                    'horizon_end_t': 1969 - 1 - (28 * 3)}
     validation_ts = {'data_start_t': 1969 - 1 - (28 * 16), 'horizon_start_t': 1969 - 1 - (28 * 3),
                      'horizon_end_t': 1969 - 1 - (28 * 2)}
