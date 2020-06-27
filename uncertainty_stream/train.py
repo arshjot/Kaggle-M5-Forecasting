@@ -32,11 +32,11 @@ class Trainer:
         print(self.model, end='\n\n')
 
         # Loss, Optimizer and LRScheduler
-        self.criterion = getattr(loss_functions, config.loss_fn)(self.config)
+        self.criterion = getattr(loss_functions, self.config.loss_fn)(self.config)
         self.optimizer = torch.optim.RMSprop(self.model.parameters(), lr=self.config.learning_rate, alpha=0.95)
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, factor=0.5,
-                                                                    patience=3, verbose=True)
-        self.early_stopping = EarlyStopping(patience=8)
+                                                                    patience=4, verbose=True)
+        self.early_stopping = EarlyStopping(patience=10)
         self.agg_sum = self.config.loss_fn[:3] == 'SPL'
         self.loss_agg = np.sum if self.agg_sum else np.mean
 
@@ -44,16 +44,17 @@ class Trainer:
         self.metric = getattr(metrics, config.metric)()
         self.metric_2 = getattr(metrics, config.secondary_metric)()
 
-        print(f' Loading data '.center(self.terminal_width, '*'))
+        print(f' Loading Data '.center(self.terminal_width, '*'))
         data_loader = DataLoader(self.config)
         self.ids = data_loader.ids
+
         self.train_loader = data_loader.create_train_loader()
         self.val_loader = data_loader.create_val_loader()
         self.n_windows = data_loader.n_windows
 
         self.start_epoch, self.min_val_error = 1, None
         # Load checkpoint if training is to be resumed
-        self.model_checkpoint = ModelCheckpoint()
+        self.model_checkpoint = ModelCheckpoint(config=self.config)
         if config.resume_training:
             self.model, self.optimizer, self.scheduler, [self.start_epoch, self.min_val_error, num_bad_epochs] = \
                 self.model_checkpoint.load(self.model, self.optimizer, self.scheduler)
@@ -62,12 +63,21 @@ class Trainer:
             print(f'Resuming model training from epoch {self.start_epoch}')
         else:
             # remove previous logs, if any
-            logs = glob.glob('./logs/.*') + glob.glob('./logs/*')
-            for f in logs:
-                os.remove(f)
+            if self.config.fold is None:
+                logs = glob.glob('./logs/.*') + glob.glob('./logs/*')
+                for f in logs:
+                    try:
+                        os.remove(f)
+                    except IsADirectoryError:
+                        shutil.rmtree(f)
+            else:
+                logs = glob.glob(f'./logs/fold_{self.config.fold}/.*') + glob.glob(f'./logs/fold_{self.config.fold}/*')
+                for f in logs:
+                    os.remove(f)
 
         # logging
-        self.writer = SummaryWriter('logs')
+        self.writer = SummaryWriter(f'logs') if self.config.fold is None \
+            else SummaryWriter(f'logs/fold_{self.config.fold}')
 
     def _get_val_loss_and_err(self):
         self.model.eval()
@@ -197,5 +207,27 @@ class Trainer:
 
 if __name__ == "__main__":
     config = Config
-    trainer = Trainer(config)
-    trainer.train()
+    terminal_width = shutil.get_terminal_size((80, 20)).columns
+    # Check if k-fold training is enabled
+    if config.k_fold:
+        print(f' K-fold Training '.center(terminal_width, '*'))
+
+        # If resuming model training, start training from specified fold
+        start_fold = config.resume_from_fold - 1 if config.resume_training else 0
+
+        # Loop over all folds and train model using the corresponding fold config
+        for fold, [fold_train_ts, fold_val_ts] in enumerate(config.k_fold_splits):
+            if fold < start_fold:
+                continue
+            config.fold = fold + 1
+            print()
+            print(f' Fold [{config.fold}/{len(config.k_fold_splits)}] '.center(terminal_width, '*'))
+            config.training_ts, config.validation_ts = fold_train_ts, fold_val_ts
+
+            trainer = Trainer(config)
+            trainer.train()
+            config.resume_training = False  # Train future folds from the beginning
+    else:
+        config.fold = None
+        trainer = Trainer(config)
+        trainer.train()

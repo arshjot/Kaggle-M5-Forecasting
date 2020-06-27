@@ -9,8 +9,9 @@ class ModelCheckpoint:
     def __init__(self, weight_dir='./weights', config=Config):
         self.weight_dir = weight_dir
         self.config = config
-        self.filename = os.path.join(self.weight_dir, 'model_latest_checkpoint.pth.tar')
-        self.best_filename = os.path.join(self.weight_dir, 'model_best.pth.tar')
+        file_prefix = '' if config.fold is None else f'fold_{config.fold}_'
+        self.filename = os.path.join(self.weight_dir, file_prefix + 'model_latest_checkpoint.pth.tar')
+        self.best_filename = os.path.join(self.weight_dir, file_prefix + 'model_best.pth.tar')
 
     def save(self, is_best, min_val_error, num_bad_epochs, epoch, model, optimizer, scheduler=None):
         scheduler_save = scheduler if scheduler is None else scheduler.state_dict()

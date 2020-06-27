@@ -73,12 +73,12 @@ class CustomDataset(data_utils.Dataset):
             ids_idx = idx - (self.window_id[idx] * 42840)
             window_id = self.window_id[idx]
         else:
+            time_range = self.window_time_range
+            ids_idx = idx
+            window_id = 0
             if self.Y is not None:
-                time_range = self.window_time_range
                 scale = self.rmsse_denominator[idx]
                 weight = self.wrmsse_weights[idx]
-                ids_idx = idx
-                window_id = 0
 
         # Filter data for time range of the selected window, also normalize prev_day_sales and sell_price
         norm_factor = self.norm_factor[idx]
@@ -140,7 +140,8 @@ class CustomDataset(data_utils.Dataset):
         X_enc_dec_feats = self.X_enc_dec_feats[time_range[0]:time_range[2], ids_idx]
         X_enc_dec_feats[:, 0] = X_enc_dec_feats[:, 0] / self.norm_factor_sell_p[idx]
 
-        Y = self.Y[ids_idx, time_range[1]:time_range[2]]
+        if self.Y is not None:
+            Y = self.Y[ids_idx, time_range[1]:time_range[2]]
 
         enc_timesteps = time_range[1] - time_range[0]
         dec_timesteps = time_range[2] - time_range[0] - enc_timesteps

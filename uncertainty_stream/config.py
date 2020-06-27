@@ -4,6 +4,7 @@ import torch
 class Config:
 
     resume_training = False
+    resume_from_fold = 1  # In case of k-fold training [1, k]
 
     loss_fn = 'SPLLoss'
     metric = 'SPLMetric'
@@ -15,8 +16,8 @@ class Config:
     window_length = 28 * 13
 
     lag_and_roll_feats = True  # Note: Currently only works with dilated_seq2seq architecture
-    lags = list(range(1, 42))
-    rolling = [7, 14, 30, 60]
+    lags = list(range(27, 42))
+    rolling = [7, 14, 30, 60, 180]
 
     # Regularization
     add_random_noise = True
@@ -44,12 +45,31 @@ class Config:
     learning_rate = 0.0003
 
     # training, validation and test periods
-    training_ts = {'data_start_t': 1969 - 1 - (28 * 29), 'horizon_start_t': 1969 - 1 - (28 * 4),
-                   'horizon_end_t': 1969 - 1 - (28 * 3)}
-    validation_ts = {'data_start_t': 1969 - 1 - (28 * 16), 'horizon_start_t': 1969 - 1 - (28 * 3),
-                     'horizon_end_t': 1969 - 1 - (28 * 2)}
-    test_ts = {'data_start_t': 1969 - 1 - (28 * 15), 'horizon_start_t': 1969 - 1 - (28 * 2),
-               'horizon_end_t': 1969 - 1 - (28 * 1)}
+    training_ts = {'data_start_t': 1969 - 1 - (28 * 28), 'horizon_start_t': 1969 - 1 - (28 * 3),
+                   'horizon_end_t': 1969 - 1 - (28 * 2)}
+    validation_ts = {'data_start_t': 1969 - 1 - (28 * 15), 'horizon_start_t': 1969 - 1 - (28 * 2),
+                     'horizon_end_t': 1969 - 1 - (28 * 1)}
+    test_ts = {'data_start_t': 1969 - 1 - (28 * 14), 'horizon_start_t': 1969 - 1 - (28 * 1),
+               'horizon_end_t': 1969 - 1 - (28 * 0)}
 
-    data_file = '../accuracy_stream/data/data.pickle'
+    # Parameters for k-fold training
+    k_fold = True
+    k_fold_splits = [(f_train_ts, f_val_ts) for f_train_ts, f_val_ts in
+                     zip([
+                         {'data_start_t': 1969 - 1 - (28 * 30), 'horizon_start_t': 1969 - 1 - (28 * 5),
+                          'horizon_end_t': 1969 - 1 - (28 * 4)},
+                         {'data_start_t': 1969 - 1 - (28 * 29), 'horizon_start_t': 1969 - 1 - (28 * 4),
+                          'horizon_end_t': 1969 - 1 - (28 * 3)},
+                         {'data_start_t': 1969 - 1 - (28 * 28), 'horizon_start_t': 1969 - 1 - (28 * 3),
+                          'horizon_end_t': 1969 - 1 - (28 * 2)}
+                     ], [
+                         {'data_start_t': 1969 - 1 - (28 * 17), 'horizon_start_t': 1969 - 1 - (28 * 4),
+                          'horizon_end_t': 1969 - 1 - (28 * 3)},
+                         {'data_start_t': 1969 - 1 - (28 * 16), 'horizon_start_t': 1969 - 1 - (28 * 3),
+                          'horizon_end_t': 1969 - 1 - (28 * 2)},
+                         {'data_start_t': 1969 - 1 - (28 * 15), 'horizon_start_t': 1969 - 1 - (28 * 2),
+                          'horizon_end_t': 1969 - 1 - (28 * 1)}
+                     ])]
+
+    data_file = './data/data.pickle'
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
