@@ -108,8 +108,9 @@ class CustomDataset(data_utils.Dataset):
                                                                      self.config.noise_rate)).astype(np.bool)
                 noise[mask] = random_noise[mask]
 
-                X_prev_day_sales[X_prev_day_sales >= 0] *= noise[time_range[0]:time_range[1]][X_prev_day_sales >= 0]
-                X_prev_day_sales_dec[X_prev_day_sales_dec >= 0] *= noise[time_range[1]:time_range[2]][X_prev_day_sales_dec >= 0]
+                X_prev_day_sales[X_prev_day_sales >= 0] *= noise[:time_range[1] - time_range[0]][X_prev_day_sales >= 0]
+                X_prev_day_sales_dec[X_prev_day_sales_dec >= 0] *= noise[time_range[1]
+                                                                         - time_range[2]:][X_prev_day_sales_dec >= 0]
 
             if self.lagged_feats is not None:
                 # lagged features
@@ -122,8 +123,9 @@ class CustomDataset(data_utils.Dataset):
                                                                          self.config.noise_rate)).astype(np.bool)
                     noise[mask] = random_noise[mask]
 
-                    X_lag_feats_enc[X_lag_feats_enc >= 0] *= noise[time_range[0]:time_range[1]][X_lag_feats_enc >= 0]
-                    X_lag_feats_dec[X_lag_feats_dec >= 0] *= noise[time_range[1]:time_range[2]][X_lag_feats_dec >= 0]
+                    X_lag_feats_enc[X_lag_feats_enc >= 0] *= noise[:time_range[1] - time_range[0]][X_lag_feats_enc >= 0]
+                    X_lag_feats_dec[X_lag_feats_dec >= 0] *= noise[time_range[1]
+                                                                   - time_range[2]:][X_lag_feats_dec >= 0]
 
                 # rolling features
                 random_noise = np.clip(np.random.normal(1, X_roll_feats_enc[:, :len(self.config.rolling)].std(0),
@@ -134,8 +136,8 @@ class CustomDataset(data_utils.Dataset):
                                                                      self.config.noise_rate)).astype(np.bool)
                 noise[mask] = random_noise[mask]
 
-                X_roll_feats_enc[:, :len(self.config.rolling)] *= noise[time_range[0]:time_range[1]]
-                X_roll_feats_enc[:, len(self.config.rolling):] *= noise[time_range[0]:time_range[1]]
+                X_roll_feats_enc[:, :len(self.config.rolling)] *= noise
+                X_roll_feats_enc[:, len(self.config.rolling):] *= noise
 
         X_enc_dec_feats = self.X_enc_dec_feats[time_range[0]:time_range[2], ids_idx]
         X_enc_dec_feats[:, 0] = X_enc_dec_feats[:, 0] / self.norm_factor_sell_p[idx]
