@@ -140,7 +140,11 @@ class CustomDataset(data_utils.Dataset):
                 X_roll_feats_enc[:, len(self.config.rolling):] *= noise
 
         X_enc_dec_feats = self.X_enc_dec_feats[time_range[0]:time_range[2], ids_idx]
-        X_enc_dec_feats[:, 0] = X_enc_dec_feats[:, 0] / self.norm_factor_sell_p[idx]
+
+        # Directly dividing the sell price column leads to memory explosion
+        norm_factor_sell_p = np.ones_like(X_enc_dec_feats)
+        norm_factor_sell_p[:, 0] = self.norm_factor_sell_p[idx]
+        X_enc_dec_feats = X_enc_dec_feats / norm_factor_sell_p
 
         if self.Y is not None:
             Y = self.Y[ids_idx, time_range[1]:time_range[2]]
@@ -309,7 +313,7 @@ class DataLoader:
             norm_factor_sell_p = np.median(X_sell_p, 0)
             norm_factor_sell_p[norm_factor_sell_p == 0] = 1.
 
-            window_time_range = [0, horizon_start_t - data_start_t, horizon_end_t - data_start_t]
+            window_time_range = np.array([0, horizon_start_t - data_start_t, horizon_end_t - data_start_t])
             scales = np.array(rmsse_den)
             window_id = None
 
