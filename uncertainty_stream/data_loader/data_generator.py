@@ -98,11 +98,11 @@ class CustomDataset(data_utils.Dataset):
             X_roll_feats_enc = self.rolling_feats[time_range[0]:time_range[1], ids_idx] / norm_factor
 
         # If training and if enabled in config, multiply sales features by random noise
-        # (new value will be lower bound by 0 and upper bound by 2)
+        # (new value will be lower bound by 0)
         if self.config.add_random_noise and self.is_training:
             if len(X_prev_day_sales[X_prev_day_sales >= 0]) > 0:
                 random_noise = np.clip(np.random.normal(1, X_prev_day_sales[X_prev_day_sales >= 0].std(),
-                                                        time_range[2] - time_range[0]), 0, 2)
+                                                        time_range[2] - time_range[0]), 0, None)
                 noise = np.ones_like(random_noise)
                 mask = np.random.choice([0, 1], size=noise.shape, p=((1 - self.config.noise_rate),
                                                                      self.config.noise_rate)).astype(np.bool)
@@ -116,7 +116,7 @@ class CustomDataset(data_utils.Dataset):
                 if len(X_lag_feats_enc[X_lag_feats_enc >= 0]) > 0:
                     random_noise = np.clip(np.random.normal(1, X_lag_feats_enc[X_lag_feats_enc >= 0].std(0),
                                                             [time_range[2] - time_range[0],
-                                                             X_lag_feats_enc.shape[1]]), 0, 2)
+                                                             X_lag_feats_enc.shape[1]]), 0, None)
                     noise = np.ones_like(random_noise)
                     mask = np.random.choice([0, 1], size=noise.shape, p=((1 - self.config.noise_rate),
                                                                          self.config.noise_rate)).astype(np.bool)
@@ -128,7 +128,7 @@ class CustomDataset(data_utils.Dataset):
                 # rolling features
                 random_noise = np.clip(np.random.normal(1, X_roll_feats_enc[:, :len(self.config.rolling)].std(0),
                                                         [time_range[1] - time_range[0],
-                                                         len(self.config.rolling)]), 0, 2)
+                                                         len(self.config.rolling)]), 0, None)
                 noise = np.ones_like(random_noise)
                 mask = np.random.choice([0, 1], size=noise.shape, p=((1 - self.config.noise_rate),
                                                                      self.config.noise_rate)).astype(np.bool)
