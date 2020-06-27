@@ -133,14 +133,25 @@ class Seq2Seq(nn.Module):
                                            x_sales_feats_dec[:, timestep, 1:]], dim=1).unsqueeze(1)
                     prev_sales = torch.cat([prev_sales, decoder_output[:, 4].unsqueeze(1)], 1)
 
-            # Create rolling features, if required
+            # Create lagged and rolling features, if required
             if self.config.lag_and_roll_feats:
+                # lagged features with a lag of <= 28 will be recreated to utilize predicted values
+                update_lags = sorted(self.config.lags, reverse=True)
+                update_lags = [l_i for l_i in update_lags if l_i <= 28]
+
+                lagged_feats = torch.zeros(batch_size, 1, len(update_lags))
+                for lag_idx, lag_i in enumerate(update_lags):
+                    lag_i_feat = prev_sales[:, -lag_i]
+                    lagged_feats[:, 0, lag_idx] = lag_i_feat
+
                 rolling_feats = torch.zeros(batch_size, 1, len(self.config.rolling) * 2)
                 for roll_idx, roll_i in enumerate(self.config.rolling):
                     roll_i_feat = prev_sales[:, -roll_i:]
                     rolling_feats[:, 0, roll_idx] = roll_i_feat.mean()
                     rolling_feats[:, 0, roll_idx + len(self.config.rolling)] = roll_i_feat.std()
-                dec_input = torch.cat([dec_input, rolling_feats], 2)
+
+                dec_input = torch.cat([dec_input, rolling_feats], 2) if len(update_lags) == 0 \
+                    else torch.cat([dec_input[:, :, :-len(update_lags)], lagged_feats, rolling_feats], 2)
 
             # the hidden state of the encoder will be the initialize the decoder's hidden state
             decoder_output, hidden = self.decoder(dec_input, x_dec_emb[:, timestep, :].unsqueeze(1),

@@ -15,7 +15,7 @@ class Config:
     window_length = 28 * 13
 
     lag_and_roll_feats = True  # Note: Currently only works with dilated_seq2seq architecture
-    lags = list(range(27, 42))  # Do not put lags < 27 - currently not compatible with seq2seq decoder code
+    lags = list(range(1, 42))
     rolling = [7, 14, 30, 60]
 
     # Regularization

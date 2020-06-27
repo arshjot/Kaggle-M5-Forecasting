@@ -314,7 +314,7 @@ class DataLoader:
         if self.config.lag_and_roll_feats:
             max_prev_ts_req = max(self.config.lags + self.config.rolling)
             lagged_feats = []
-            for lag_i in self.config.lags:
+            for lag_i in np.array(sorted(self.config.lags, reverse=True)):
                 lag_i_feat = np.roll(self.X_prev_day_sales_unsold_negative[data_start_t - max_prev_ts_req:]
                                      .astype(np.int32), lag_i, axis=0)
                 lag_i_feat[:lag_i] = 0
@@ -382,7 +382,7 @@ class DataLoader:
         if self.config.lag_and_roll_feats:
             max_prev_ts_req = max(self.config.lags + self.config.rolling)
             lagged_feats = []
-            for lag_i in self.config.lags:
+            for lag_i in np.array(sorted(self.config.lags, reverse=True)):
                 lag_i_feat = np.roll(self.X_prev_day_sales_unsold_negative[data_start_t - max_prev_ts_req:]
                                      .astype(np.int32), lag_i, axis=0)
                 lag_i_feat[:lag_i] = 0
@@ -435,7 +435,7 @@ class DataLoader:
         if self.config.lag_and_roll_feats:
             max_prev_ts_req = max(self.config.lags + self.config.rolling)
             lagged_feats = []
-            for lag_i in self.config.lags:
+            for lag_i in np.array(sorted(self.config.lags, reverse=True)):
                 lag_i_feat = np.roll(self.X_prev_day_sales_unsold_negative[data_start_t - max_prev_ts_req:]
                                      .astype(np.int32), lag_i, axis=0)
                 lag_i_feat[:lag_i] = 0
