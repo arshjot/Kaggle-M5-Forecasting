@@ -6,7 +6,7 @@ pd.options.mode.chained_assignment = None
 
 
 def read_data(input_data_dir='../../data/', output_dir='./'):
-    train_data = pd.read_csv(f'{input_data_dir}/sales_train_validation.csv')
+    train_data = pd.read_csv(f'{input_data_dir}/sales_train_evaluation.csv')
     sell_prices = pd.read_csv(f'{input_data_dir}/sell_prices.csv')
     calendar = pd.read_csv(f'{input_data_dir}/calendar.csv')
 
@@ -46,7 +46,7 @@ def read_data(input_data_dir='../../data/', output_dir='./'):
     sell_prices['id'] = sell_prices['item_id'] + '_' + sell_prices['store_id']
 
     # add empty columns for future data
-    train_data = pd.concat([train_data, pd.DataFrame(columns=['d_'+str(i) for i in range(1914, 1970)])])
+    train_data = pd.concat([train_data, pd.DataFrame(columns=['d_'+str(i) for i in range(1942, 1970)])])
 
     # Encode categorical features using either one-hot or label encoding (for embeddings)
     print('* Encoding categorical features')
