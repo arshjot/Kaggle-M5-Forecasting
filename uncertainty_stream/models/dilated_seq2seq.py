@@ -139,16 +139,19 @@ class Seq2Seq(nn.Module):
                 update_lags = sorted(self.config.lags, reverse=True)
                 update_lags = [l_i for l_i in update_lags if l_i <= 28]
 
-                lagged_feats = torch.zeros(batch_size, 1, len(update_lags))
+                lagged_feats = []
                 for lag_idx, lag_i in enumerate(update_lags):
                     lag_i_feat = prev_sales[:, -lag_i]
-                    lagged_feats[:, 0, lag_idx] = lag_i_feat
+                    lagged_feats.append(lag_i_feat)
+                lagged_feats = torch.stack(lagged_feats, 1).unsqueeze(1)
 
-                rolling_feats = torch.zeros(batch_size, 1, len(self.config.rolling) * 2)
+                rolling_feats_mean, rolling_feats_std = [], []
                 for roll_idx, roll_i in enumerate(self.config.rolling):
                     roll_i_feat = prev_sales[:, -roll_i:]
-                    rolling_feats[:, 0, roll_idx] = roll_i_feat.mean()
-                    rolling_feats[:, 0, roll_idx + len(self.config.rolling)] = roll_i_feat.std()
+                    rolling_feats_mean.append(roll_i_feat.mean(1))
+                    rolling_feats_std.append(roll_i_feat.std(1))
+                rolling_feats = torch.cat([torch.stack(rolling_feats_mean, 1), torch.stack(rolling_feats_std, 1)], 1)\
+                    .unsqueeze(1)
 
                 dec_input = torch.cat([dec_input, rolling_feats], 2) if len(update_lags) == 0 \
                     else torch.cat([dec_input[:, :, :-len(update_lags)], lagged_feats, rolling_feats], 2)
