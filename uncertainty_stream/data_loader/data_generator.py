@@ -142,7 +142,7 @@ class CustomDataset(data_utils.Dataset):
         X_enc_dec_feats = self.X_enc_dec_feats[time_range[0]:time_range[2], ids_idx]
 
         # Directly dividing the sell price column leads to memory explosion
-        norm_factor_sell_p = np.ones_like(X_enc_dec_feats)
+        norm_factor_sell_p = np.ones_like(X_enc_dec_feats, np.float64)
         norm_factor_sell_p[:, 0] = self.norm_factor_sell_p[idx]
         X_enc_dec_feats = X_enc_dec_feats / norm_factor_sell_p
 
