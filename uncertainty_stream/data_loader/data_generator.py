@@ -6,7 +6,6 @@ import torch
 import torch.utils.data
 import torch.utils.data as data_utils
 import pickle as pkl
-import scipy.ndimage as sci
 
 from utils.data_utils import *
 
@@ -41,7 +40,7 @@ class CustomDataset(data_utils.Dataset):
 
     def __init__(self, X_prev_day_sales, X_enc_only_feats, X_enc_dec_feats, X_calendar, norm_factor, norm_factor_sell_p,
                  window_time_range, lagged_feats=None, rolling_feats=None, Y=None, rmsse_denominator=None,
-                 wrmsse_weights=None, window_id=None):
+                 wrmsse_weights=None, window_id=None, config=None, is_training=True):
 
         self.X_prev_day_sales = X_prev_day_sales
         self.X_enc_only_feats = X_enc_only_feats
@@ -53,6 +52,8 @@ class CustomDataset(data_utils.Dataset):
         self.window_id = window_id
         self.lagged_feats = lagged_feats
         self.rolling_feats = rolling_feats
+        self.config = config
+        self.is_training = is_training
 
         if Y is not None:
             self.Y = torch.from_numpy(Y).float()
@@ -91,8 +92,50 @@ class CustomDataset(data_utils.Dataset):
         if self.lagged_feats is not None:
             X_lag_feats_enc = self.lagged_feats[time_range[0]:time_range[1], ids_idx] / norm_factor
             X_lag_feats_dec = self.lagged_feats[time_range[1]:time_range[2], ids_idx] / norm_factor
+            X_lag_feats_enc[X_lag_feats_enc < 0] = -1.0
+            X_lag_feats_dec[X_lag_feats_dec < 0] = -1.0
             # rolling features for decoder will be calculated on the fly (by including predictions for the prev steps)
             X_roll_feats_enc = self.rolling_feats[time_range[0]:time_range[1], ids_idx] / norm_factor
+
+        # If training and if enabled in config, multiply sales features by random noise
+        # (new value will be lower bound by 0 and upper bound by 2)
+        if self.config.add_random_noise and self.is_training:
+            if len(X_prev_day_sales[X_prev_day_sales >= 0]) > 0:
+                random_noise = np.clip(np.random.normal(1, X_prev_day_sales[X_prev_day_sales >= 0].std(),
+                                                        time_range[2] - time_range[0]), 0, 2)
+                noise = np.ones_like(random_noise)
+                mask = np.random.choice([0, 1], size=noise.shape, p=((1 - self.config.noise_rate),
+                                                                     self.config.noise_rate)).astype(np.bool)
+                noise[mask] = random_noise[mask]
+
+                X_prev_day_sales[X_prev_day_sales >= 0] *= noise[time_range[0]:time_range[1]][X_prev_day_sales >= 0]
+                X_prev_day_sales_dec[X_prev_day_sales_dec >= 0] *= noise[time_range[1]:time_range[2]][X_prev_day_sales_dec >= 0]
+
+            if self.lagged_feats is not None:
+                # lagged features
+                if len(X_lag_feats_enc[X_lag_feats_enc >= 0]) > 0:
+                    random_noise = np.clip(np.random.normal(1, X_lag_feats_enc[X_lag_feats_enc >= 0].std(0),
+                                                            [time_range[2] - time_range[0],
+                                                             X_lag_feats_enc.shape[1]]), 0, 2)
+                    noise = np.ones_like(random_noise)
+                    mask = np.random.choice([0, 1], size=noise.shape, p=((1 - self.config.noise_rate),
+                                                                         self.config.noise_rate)).astype(np.bool)
+                    noise[mask] = random_noise[mask]
+
+                    X_lag_feats_enc[X_lag_feats_enc >= 0] *= noise[time_range[0]:time_range[1]][X_lag_feats_enc >= 0]
+                    X_lag_feats_dec[X_lag_feats_dec >= 0] *= noise[time_range[1]:time_range[2]][X_lag_feats_dec >= 0]
+
+                # rolling features
+                random_noise = np.clip(np.random.normal(1, X_roll_feats_enc[:, :len(self.config.rolling)].std(0),
+                                                        [time_range[1] - time_range[0],
+                                                         len(self.config.rolling)]), 0, 2)
+                noise = np.ones_like(random_noise)
+                mask = np.random.choice([0, 1], size=noise.shape, p=((1 - self.config.noise_rate),
+                                                                     self.config.noise_rate)).astype(np.bool)
+                noise[mask] = random_noise[mask]
+
+                X_roll_feats_enc[:, :len(self.config.rolling)] *= noise[time_range[0]:time_range[1]]
+                X_roll_feats_enc[:, len(self.config.rolling):] *= noise[time_range[0]:time_range[1]]
 
         X_enc_dec_feats = self.X_enc_dec_feats[time_range[0]:time_range[2], ids_idx]
         X_enc_dec_feats[:, 0] = X_enc_dec_feats[:, 0] / self.norm_factor_sell_p[idx]
@@ -272,19 +315,21 @@ class DataLoader:
             max_prev_ts_req = max(self.config.lags + self.config.rolling)
             lagged_feats = []
             for lag_i in self.config.lags:
-                lag_i_feat = np.roll(self.X_prev_day_sales[data_start_t - max_prev_ts_req:].astype(np.int32),
-                                     lag_i, axis=0)
+                lag_i_feat = np.roll(self.X_prev_day_sales_unsold_negative[data_start_t - max_prev_ts_req:]
+                                     .astype(np.int32), lag_i, axis=0)
                 lag_i_feat[:lag_i] = 0
                 lagged_feats.append(lag_i_feat)
             lagged_feats = np.stack(lagged_feats, axis=2)[max_prev_ts_req:]
 
-            rolling_feats = []
+            rolling_feats, roll_i_means, roll_i_stds = [], [], []
             roll_df = pd.DataFrame(self.X_prev_day_sales[data_start_t - max_prev_ts_req:].astype(np.int32))
             for roll_i in self.config.rolling:
                 roll_i_feat_mean = pd.DataFrame(roll_df).rolling(roll_i, axis=0).mean().fillna(0).values
+                roll_i_means.append(roll_i_feat_mean)
+            for roll_i in self.config.rolling:
                 roll_i_feat_std = pd.DataFrame(roll_df).rolling(roll_i, axis=0).std().fillna(0).values
-                rolling_feats.append(np.stack([roll_i_feat_mean, roll_i_feat_std], 2))
-            rolling_feats = np.concatenate(rolling_feats, 2)[max_prev_ts_req:]
+                roll_i_stds.append(roll_i_feat_std)
+            rolling_feats = np.stack(roll_i_means + roll_i_stds, 2)[max_prev_ts_req:]
         else:
             lagged_feats, rolling_feats = None, None
 
@@ -295,7 +340,8 @@ class DataLoader:
                                 norm_factor, norm_factor_sell_p, window_time_range,
                                 lagged_feats, rolling_feats,
                                 Y=self.Y[:, data_start_t:],
-                                rmsse_denominator=scales, wrmsse_weights=weights, window_id=window_id)
+                                rmsse_denominator=scales, wrmsse_weights=weights, window_id=window_id,
+                                config=self.config)
 
         return torch.utils.data.DataLoader(dataset=dataset, batch_size=self.config.batch_size, shuffle=True,
                                            num_workers=3, pin_memory=True)
@@ -337,19 +383,21 @@ class DataLoader:
             max_prev_ts_req = max(self.config.lags + self.config.rolling)
             lagged_feats = []
             for lag_i in self.config.lags:
-                lag_i_feat = np.roll(self.X_prev_day_sales[data_start_t - max_prev_ts_req:].astype(np.int32),
-                                     lag_i, axis=0)
+                lag_i_feat = np.roll(self.X_prev_day_sales_unsold_negative[data_start_t - max_prev_ts_req:]
+                                     .astype(np.int32), lag_i, axis=0)
                 lag_i_feat[:lag_i] = 0
                 lagged_feats.append(lag_i_feat)
             lagged_feats = np.stack(lagged_feats, axis=2)[max_prev_ts_req:]
 
-            rolling_feats = []
+            rolling_feats, roll_i_means, roll_i_stds = [], [], []
             roll_df = pd.DataFrame(self.X_prev_day_sales[data_start_t - max_prev_ts_req:].astype(np.int32))
             for roll_i in self.config.rolling:
                 roll_i_feat_mean = pd.DataFrame(roll_df).rolling(roll_i, axis=0).mean().fillna(0).values
+                roll_i_means.append(roll_i_feat_mean)
+            for roll_i in self.config.rolling:
                 roll_i_feat_std = pd.DataFrame(roll_df).rolling(roll_i, axis=0).std().fillna(0).values
-                rolling_feats.append(np.stack([roll_i_feat_mean, roll_i_feat_std], 2))
-            rolling_feats = np.concatenate(rolling_feats, 2)[max_prev_ts_req:]
+                roll_i_stds.append(roll_i_feat_std)
+            rolling_feats = np.stack(roll_i_means + roll_i_stds, 2)[max_prev_ts_req:]
         else:
             lagged_feats, rolling_feats = None, None
 
@@ -360,7 +408,8 @@ class DataLoader:
                                 norm_factor, norm_factor_sell_p, window_time_range,
                                 lagged_feats, rolling_feats,
                                 Y=self.Y[:, data_start_t:],
-                                rmsse_denominator=np.array(rmsse_den), wrmsse_weights=weights)
+                                rmsse_denominator=np.array(rmsse_den), wrmsse_weights=weights,
+                                config=self.config, is_training=False)
 
         return torch.utils.data.DataLoader(dataset=dataset, batch_size=self.config.batch_size, num_workers=3,
                                            pin_memory=True)
@@ -387,19 +436,21 @@ class DataLoader:
             max_prev_ts_req = max(self.config.lags + self.config.rolling)
             lagged_feats = []
             for lag_i in self.config.lags:
-                lag_i_feat = np.roll(self.X_prev_day_sales[data_start_t - max_prev_ts_req:].astype(np.int32),
-                                     lag_i, axis=0)
+                lag_i_feat = np.roll(self.X_prev_day_sales_unsold_negative[data_start_t - max_prev_ts_req:]
+                                     .astype(np.int32), lag_i, axis=0)
                 lag_i_feat[:lag_i] = 0
                 lagged_feats.append(lag_i_feat)
             lagged_feats = np.stack(lagged_feats, axis=2)[max_prev_ts_req:]
 
-            rolling_feats = []
+            rolling_feats, roll_i_means, roll_i_stds = [], [], []
             roll_df = pd.DataFrame(self.X_prev_day_sales[data_start_t - max_prev_ts_req:].astype(np.int32))
             for roll_i in self.config.rolling:
                 roll_i_feat_mean = pd.DataFrame(roll_df).rolling(roll_i, axis=0).mean().fillna(0).values
+                roll_i_means.append(roll_i_feat_mean)
+            for roll_i in self.config.rolling:
                 roll_i_feat_std = pd.DataFrame(roll_df).rolling(roll_i, axis=0).std().fillna(0).values
-                rolling_feats.append(np.stack([roll_i_feat_mean, roll_i_feat_std], 2))
-            rolling_feats = np.concatenate(rolling_feats, 2)[max_prev_ts_req:]
+                roll_i_stds.append(roll_i_feat_std)
+            rolling_feats = np.stack(roll_i_means + roll_i_stds, 2)[max_prev_ts_req:]
         else:
             lagged_feats, rolling_feats = None, None
 
@@ -408,7 +459,7 @@ class DataLoader:
                                 self.X_enc_dec_feats[data_start_t:],
                                 self.X_calendar[data_start_t:],
                                 norm_factor, norm_factor_sell_p, window_time_range,
-                                lagged_feats, rolling_feats)
+                                lagged_feats, rolling_feats, config=self.config, is_training=False)
 
         return torch.utils.data.DataLoader(dataset=dataset, batch_size=self.config.batch_size, num_workers=3,
                                            pin_memory=True)

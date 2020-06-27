@@ -138,8 +138,8 @@ class Seq2Seq(nn.Module):
                 rolling_feats = torch.zeros(batch_size, 1, len(self.config.rolling) * 2)
                 for roll_idx, roll_i in enumerate(self.config.rolling):
                     roll_i_feat = prev_sales[:, -roll_i:]
-                    rolling_feats[:, 0, roll_idx * 2] = roll_i_feat.mean()
-                    rolling_feats[:, 0, 1 + (roll_idx * 2)] = roll_i_feat.std()
+                    rolling_feats[:, 0, roll_idx] = roll_i_feat.mean()
+                    rolling_feats[:, 0, roll_idx + len(self.config.rolling)] = roll_i_feat.std()
                 dec_input = torch.cat([dec_input, rolling_feats], 2)
 
             # the hidden state of the encoder will be the initialize the decoder's hidden state

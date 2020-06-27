@@ -18,6 +18,10 @@ class Config:
     lags = list(range(27, 42))  # Do not put lags < 27 - currently not compatible with seq2seq decoder code
     rolling = [7, 14, 30, 60]
 
+    # Regularization
+    add_random_noise = True
+    noise_rate = 0.5
+
     # *** RNN *** #
     # hidden dimension and no. of layers will be the same for both encoder and decoder
     rnn_num_hidden = 128
