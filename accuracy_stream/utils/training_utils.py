@@ -2,13 +2,16 @@ import torch
 import shutil
 import os
 import numpy as np
+from config import Config
 
 
 class ModelCheckpoint:
-    def __init__(self, weight_dir='./weights'):
+    def __init__(self, weight_dir='./weights', config=Config):
         self.weight_dir = weight_dir
-        self.filename = os.path.join(self.weight_dir, 'model_latest_checkpoint.pth.tar')
-        self.best_filename = os.path.join(self.weight_dir, 'model_best.pth.tar')
+        self.config = config
+        file_prefix = '' if config.fold is None else f'fold_{config.fold}_'
+        self.filename = os.path.join(self.weight_dir, file_prefix + 'model_latest_checkpoint.pth.tar')
+        self.best_filename = os.path.join(self.weight_dir, file_prefix + 'model_best.pth.tar')
 
     def save(self, is_best, min_val_error, num_bad_epochs, epoch, model, optimizer, scheduler=None):
         scheduler_save = scheduler if scheduler is None else scheduler.state_dict()
@@ -27,7 +30,7 @@ class ModelCheckpoint:
     def load(self, model, optimizer=None, scheduler=None, load_best=False):
         load_filename = self.best_filename if load_best else self.filename
         if os.path.isfile(load_filename):
-            checkpoint = torch.load(load_filename)
+            checkpoint = torch.load(load_filename, map_location=self.config.device)
             model.load_state_dict(checkpoint['model'])
             if optimizer is not None:
                 optimizer.load_state_dict(checkpoint['optimizer'])

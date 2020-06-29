@@ -1,6 +1,9 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.utils.data
+import random
+random.seed(0)
 
 
 # Build a seq2seq model
@@ -59,7 +62,7 @@ class Decoder(nn.Module):
         #         shape = output.size()
         #         output = self.pred(output.view(-1, output.size(2)))
         #         output = output.view(shape[0], shape[1]).permute(1, 0)
-        output = self.pred(output[0])
+        output = F.relu(self.pred(output[0]))
         return output, hidden
 
 
@@ -71,7 +74,7 @@ class Seq2Seq(nn.Module):
         self.decoder = decoder
         self.config = config
 
-    def forward(self, x_enc, x_enc_emb, x_cal_enc_emb, x_dec, x_dec_emb, x_cal_dec_emb, x_last_day_sales):
+    def forward(self, x_enc, x_enc_emb, x_cal_enc_emb, x_dec, x_dec_emb, x_cal_dec_emb, x_prev_day_sales_dec):
         batch_size, pred_len = x_dec.shape[0:2]
 
         # create a tensor to store the outputs
@@ -82,14 +85,20 @@ class Seq2Seq(nn.Module):
         # for each prediction timestep, use the output of the previous step,
         # concatenated with other features as the input
 
+        # enable teacher forcing only if model is in training phase
+        use_teacher_forcing = True if (random.random() < self.config.teacher_forcing_ratio) & self.training else False
+
         for timestep in range(0, pred_len):
 
             if timestep == 0:
                 # for the first timestep of decoder, use previous steps' sales
-                dec_input = torch.cat([x_dec[:, 0, :], x_last_day_sales], dim=1).unsqueeze(1)
+                dec_input = torch.cat([x_dec[:, 0, :], x_prev_day_sales_dec[:, 0]], dim=1).unsqueeze(1)
             else:
-                # for next timestep, current timestep's output will serve as the input along with other features
-                dec_input = torch.cat([x_dec[:, timestep, :], decoder_output], dim=1).unsqueeze(1)
+                if use_teacher_forcing:
+                    dec_input = torch.cat([x_dec[:, timestep, :], x_prev_day_sales_dec[:, timestep]], dim=1).unsqueeze(1)
+                else:
+                    # for next timestep, current timestep's output will serve as the input along with other features
+                    dec_input = torch.cat([x_dec[:, timestep, :], decoder_output], dim=1).unsqueeze(1)
 
             # the hidden state of the encoder will be the initialize the decoder's hidden state
             decoder_output, hidden = self.decoder(dec_input, x_dec_emb[:, timestep, :].unsqueeze(1),

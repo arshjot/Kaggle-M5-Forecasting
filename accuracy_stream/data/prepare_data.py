@@ -2,11 +2,12 @@ import numpy as np
 import pandas as pd
 import category_encoders as ce
 import pickle as pkl
+
 pd.options.mode.chained_assignment = None
 
 
 def read_data(input_data_dir='../../data/', output_dir='./'):
-    train_data = pd.read_csv(f'{input_data_dir}/sales_train_validation.csv')
+    train_data = pd.read_csv(f'{input_data_dir}/sales_train_evaluation.csv')
     sell_prices = pd.read_csv(f'{input_data_dir}/sell_prices.csv')
     calendar = pd.read_csv(f'{input_data_dir}/calendar.csv')
 
@@ -17,12 +18,12 @@ def read_data(input_data_dir='../../data/', output_dir='./'):
     calendar['relative_year'] = 2016 - calendar.year
 
     # convert month, day and weekday to cyclic encodings
-    calendar['month_sin'] = np.sin(2 * np.pi * calendar.month/12.0)
-    calendar['month_cos'] = np.cos(2 * np.pi * calendar.month/12.0)
-    calendar['day_sin'] = np.sin(2 * np.pi * calendar.date.dt.day/calendar.date.dt.days_in_month)
-    calendar['day_cos'] = np.cos(2 * np.pi * calendar.date.dt.day/calendar.date.dt.days_in_month)
-    calendar['weekday_sin'] = np.sin(2 * np.pi * calendar.wday/7.0)
-    calendar['weekday_cos'] = np.cos(2 * np.pi * calendar.wday/7.0)
+    calendar['month_sin'] = np.sin(2 * np.pi * calendar.month / 12.0)
+    calendar['month_cos'] = np.cos(2 * np.pi * calendar.month / 12.0)
+    calendar['day_sin'] = np.sin(2 * np.pi * calendar.date.dt.day / calendar.date.dt.days_in_month)
+    calendar['day_cos'] = np.cos(2 * np.pi * calendar.date.dt.day / calendar.date.dt.days_in_month)
+    calendar['weekday_sin'] = np.sin(2 * np.pi * calendar.wday / 7.0)
+    calendar['weekday_cos'] = np.cos(2 * np.pi * calendar.wday / 7.0)
 
     # use same encoded labels for both the event name columns
     cal_label = ['event_name_1', 'event_name_2']
@@ -46,15 +47,15 @@ def read_data(input_data_dir='../../data/', output_dir='./'):
     sell_prices['id'] = sell_prices['item_id'] + '_' + sell_prices['store_id']
 
     # add empty columns for future data
-    train_data = pd.concat([train_data, pd.DataFrame(columns=['d_'+str(i) for i in range(1914, 1970)])])
+    train_data = pd.concat([train_data, pd.DataFrame(columns=['d_' + str(i) for i in range(1942, 1970)])])
 
     # Encode categorical features using either one-hot or label encoding (for embeddings)
     print('* Encoding categorical features')
     label = ['item_id', 'dept_id', 'cat_id', 'store_id', 'state_id']
-    label_encoded_cols = [str(i)+'_enc' for i in label]
+    label_encoded_cols = [str(i) + '_enc' for i in label]
 
     train_data[label_encoded_cols] = train_data[label]
-    label_encoder = ce.OrdinalEncoder(cols=[str(i)+'_enc' for i in label])
+    label_encoder = ce.OrdinalEncoder(cols=[str(i) + '_enc' for i in label])
     label_encoder.fit(train_data)
     train_data = label_encoder.transform(train_data)
 
@@ -66,7 +67,7 @@ def read_data(input_data_dir='../../data/', output_dir='./'):
     print('* Add previous day sales and merge sell prices')
     data_df = pd.melt(train_data, id_vars=['id', 'item_id', 'dept_id', 'cat_id', 'store_id', 'state_id',
                                            'item_id_enc', 'dept_id_enc', 'cat_id_enc', 'store_id_enc', 'state_id_enc'],
-                      var_name='d', value_vars=['d_'+str(i) for i in range(1, 1970)], value_name='sales')
+                      var_name='d', value_vars=['d_' + str(i) for i in range(1, 1970)], value_name='sales')
 
     # change dtypes to reduce memory usage
     data_df[['sales']] = data_df[['sales']].fillna(-2).astype(np.int16)  # fill future sales as -2
@@ -132,7 +133,7 @@ def read_data(input_data_dir='../../data/', output_dir='./'):
     num_samples = data_df.id.nunique()
     num_timesteps = data_df.d.nunique()
     data_df = data_df.set_index(['id', 'd'])
-    
+
     ids = ['item_id', 'dept_id', 'cat_id', 'store_id', 'state_id']
     enc_dec_feats = ['sell_price'] + label_encoded_cols
     enc_only_feats = data_df.columns.difference(['sales', 'sell_price', 'prev_day_sales'] + enc_dec_feats)
@@ -156,7 +157,7 @@ def read_data(input_data_dir='../../data/', output_dir='./'):
     print('* Save processed data')
     data_dict = {'sales_data_ids': sales_data_ids, 'calendar_index': calendar_index,
                  'X_prev_day_sales': X_prev_day_sales,
-                 'X_enc_only_feats': X_enc_only_feats, 'X_enc_dec_feats' : X_enc_dec_feats,
+                 'X_enc_only_feats': X_enc_only_feats, 'X_enc_dec_feats': X_enc_dec_feats,
                  'enc_dec_feat_names': enc_dec_feats, 'enc_only_feat_names': enc_only_feats,
                  'X_calendar': X_calendar, 'X_calendar_cols': X_calendar_cols,
                  'Y': Y,

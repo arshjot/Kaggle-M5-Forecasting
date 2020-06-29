@@ -5,6 +5,7 @@ from importlib import import_module
 import shutil
 import glob
 import os
+import sys
 
 from data_loader.data_generator import DataLoader
 from utils.data_utils import *
@@ -32,10 +33,10 @@ class Trainer:
         print(self.model, end='\n\n')
 
         # Loss, Optimizer and LRScheduler
-        self.criterion = getattr(loss_functions, config.loss_fn)()
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.config.learning_rate)
+        self.criterion = getattr(loss_functions, self.config.loss_fn)(self.config)
+        self.optimizer = torch.optim.RMSprop(self.model.parameters(), lr=self.config.learning_rate, alpha=0.95)
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, factor=0.5,
-                                                                    patience=5, verbose=True)
+                                                                    patience=4, verbose=True)
         self.early_stopping = EarlyStopping(patience=12)
         self.loss_agg = np.sum if config.loss_fn == 'WRMSSELevel12Loss' else np.mean
 
@@ -43,9 +44,10 @@ class Trainer:
         self.metric = getattr(metrics, config.metric)()
         self.metric_2 = getattr(loss_functions, config.secondary_metric)()
 
-        print(f' Loading data '.center(self.terminal_width, '*'))
+        print(f' Loading Data '.center(self.terminal_width, '*'))
         data_loader = DataLoader(self.config)
         self.ids = data_loader.ids
+
         self.train_loader = data_loader.create_train_loader()
         self.val_loader = data_loader.create_val_loader()
         self.train_metric_t, self.train_metric_w, self.train_metric_s = data_loader.get_weights_and_scaling(
@@ -56,17 +58,9 @@ class Trainer:
             self.config.validation_ts['horizon_end_t'])
         self.n_windows = data_loader.n_windows
 
-        if self.config.loss_fn == 'WRMSSELoss':
-            self.train_loss_t, self.train_loss_w, self.train_loss_s = [torch.from_numpy(i).to(self.config.device)
-                                                                       for i in [self.train_metric_t,
-                                                                                 self.train_metric_w,
-                                                                                 self.train_metric_s]]
-            # initialize predictions for WRMSSELoss calculation by replicating last month sales
-            self.train_prev_preds = torch.from_numpy(data_loader.train_prev_preds).to(self.config.device)
-
         self.start_epoch, self.min_val_error = 1, None
         # Load checkpoint if training is to be resumed
-        self.model_checkpoint = ModelCheckpoint()
+        self.model_checkpoint = ModelCheckpoint(config=self.config)
         if config.resume_training:
             self.model, self.optimizer, self.scheduler, [self.start_epoch, self.min_val_error, num_bad_epochs] = \
                 self.model_checkpoint.load(self.model, self.optimizer, self.scheduler)
@@ -75,19 +69,28 @@ class Trainer:
             print(f'Resuming model training from epoch {self.start_epoch}')
         else:
             # remove previous logs, if any
-            logs = glob.glob('./logs/.*') + glob.glob('./logs/*')
-            for f in logs:
-                os.remove(f)
+            if self.config.fold is None:
+                logs = glob.glob('./logs/.*') + glob.glob('./logs/*')
+                for f in logs:
+                    try:
+                        os.remove(f)
+                    except IsADirectoryError:
+                        shutil.rmtree(f)
+            else:
+                logs = glob.glob(f'./logs/fold_{self.config.fold}/.*') + glob.glob(f'./logs/fold_{self.config.fold}/*')
+                for f in logs:
+                    os.remove(f)
 
         # logging
-        self.writer = SummaryWriter('logs')
+        self.writer = SummaryWriter(f'logs') if self.config.fold is None \
+            else SummaryWriter(f'logs/fold_{self.config.fold}')
 
     def _get_val_loss_and_err(self):
         self.model.eval()
         progbar = tqdm(self.val_loader)
         progbar.set_description("             ")
         losses, sec_metric, epoch_preds, epoch_ids, epoch_ids_idx = [], [], [], [], []
-        for i, [x, y, norm_factor, ids_idx, loss_input, _, _] in enumerate(progbar):
+        for i, [x, y, norm_factor, ids_idx, loss_input, _] in enumerate(progbar):
             x = [inp.to(self.config.device) for inp in x]
             y = y.to(self.config.device)
             norm_factor = norm_factor.to(self.config.device)
@@ -95,7 +98,7 @@ class Trainer:
             epoch_ids.append(self.ids[ids_idx])
             epoch_ids_idx.append(ids_idx.numpy())
 
-            preds = self.model(*x) * norm_factor.unsqueeze(1)
+            preds = self.model(*x) * norm_factor[:, None]
             epoch_preds.append(preds.data.cpu().numpy())
             loss = self.criterion(preds, y, *loss_input)
             losses.append(loss.data.cpu().numpy())
@@ -119,16 +122,15 @@ class Trainer:
             progbar = tqdm(self.train_loader)
             losses, sec_metric, epoch_preds, epoch_ids, epoch_ids_idx = [], [], [], [], []
 
-            for i, [x, y, norm_factor, ids_idx, loss_input, affected_ids, window_id] in enumerate(progbar):
+            for i, [x, y, norm_factor, ids_idx, loss_input, window_id] in enumerate(progbar):
                 x = [inp.to(self.config.device) for inp in x]
                 y = y.to(self.config.device)
                 norm_factor = norm_factor.to(self.config.device)
                 loss_input = [inp.to(self.config.device) for inp in loss_input]
-                affected_ids = affected_ids.to(self.config.device)
 
                 # Forward + Backward + Optimize
                 self.optimizer.zero_grad()
-                preds = self.model(*x) * norm_factor.unsqueeze(1)
+                preds = self.model(*x) * norm_factor[:, None]
 
                 if self.config.sliding_window:
                     if torch.sum(window_id == self.n_windows - 1) > 0:
@@ -141,13 +143,6 @@ class Trainer:
                     epoch_preds.append(preds.data.cpu().numpy())
 
                 sec_metric.append(self.metric_2(preds, y, *loss_input).data.cpu().numpy())
-
-                # If WRMSSELoss is used, update the previously stored predictions according to the affected_ids
-                # Also use weights, scales and labels for all 42,840 series
-                if self.config.loss_fn == 'WRMSSELoss':
-                    preds = update_preds_acc_hierarchy(self.train_prev_preds, preds, affected_ids)
-                    y, loss_input = self.train_loss_t, [self.train_loss_s, self.train_loss_w]
-                    self.train_prev_preds = preds.detach()
 
                 loss = self.criterion(preds, y, *loss_input)
                 losses.append(loss.data.cpu().numpy())
@@ -176,9 +171,6 @@ class Trainer:
             train_error_2 = np.mean(sec_metric)
 
             val_loss, val_error, val_error_2 = self._get_val_loss_and_err()
-
-            if (self.config.loss_fn == 'WRMSSELoss') & (self.config.metric == 'WRMSSEMetric'):
-                val_loss = val_error
 
             print(f'Training Loss: {train_loss:.4f}, Training Error: {train_error:.4f}, '
                   f'Training Secondary Error: {train_error_2:.4f}\n'
@@ -221,6 +213,30 @@ class Trainer:
 
 
 if __name__ == "__main__":
+    # sys.stdout = open('train.log', 'w')
+    # sys.stderr = sys.stdout
     config = Config
-    trainer = Trainer(config)
-    trainer.train()
+    terminal_width = shutil.get_terminal_size((80, 20)).columns
+    # Check if k-fold training is enabled
+    if config.k_fold:
+        print(f' K-fold Training '.center(terminal_width, '*'))
+
+        # If resuming model training, start training from specified fold
+        start_fold = config.resume_from_fold - 1 if config.resume_training else 0
+
+        # Loop over all folds and train model using the corresponding fold config
+        for fold, [fold_train_ts, fold_val_ts] in enumerate(config.k_fold_splits):
+            if fold < start_fold:
+                continue
+            config.fold = fold + 1
+            print()
+            print(f' Fold [{config.fold}/{len(config.k_fold_splits)}] '.center(terminal_width, '*'))
+            config.training_ts, config.validation_ts = fold_train_ts, fold_val_ts
+
+            trainer = Trainer(config)
+            trainer.train()
+            config.resume_training = False  # Train future folds from the beginning
+    else:
+        config.fold = None
+        trainer = Trainer(config)
+        trainer.train()

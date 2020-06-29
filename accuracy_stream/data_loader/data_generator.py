@@ -38,86 +38,163 @@ class CustomDataset(data_utils.Dataset):
     y: targets (only in training phase)
     """
 
-    def __init__(self, X_prev_day_sales, X_enc_only_feats, X_enc_dec_feats, X_calendar, X_last_day_sales,
-                 norm_factor, Y=None, rmsse_denominator=None, wrmsse_weights=None, affected_ids=None,
-                 window_id=None):
+    def __init__(self, X_prev_day_sales, X_enc_only_feats, X_enc_dec_feats, X_calendar, norm_factor, norm_factor_sell_p,
+                 window_time_range, lagged_feats=None, rolling_feats=None, Y=None, rmsse_denominator=None,
+                 wrmsse_weights=None, window_id=None, config=None, is_training=True):
 
         self.X_prev_day_sales = X_prev_day_sales
         self.X_enc_only_feats = X_enc_only_feats
         self.X_enc_dec_feats = X_enc_dec_feats
         self.X_calendar = X_calendar
-        self.X_last_day_sales = X_last_day_sales
         self.norm_factor = norm_factor
+        self.norm_factor_sell_p = norm_factor_sell_p
+        self.window_time_range = window_time_range
         self.window_id = window_id
+        self.lagged_feats = lagged_feats
+        self.rolling_feats = rolling_feats
+        self.config = config
+        self.is_training = is_training
 
         if Y is not None:
             self.Y = torch.from_numpy(Y).float()
             self.rmsse_denominator = torch.from_numpy(rmsse_denominator).float()
             self.wrmsse_weights = torch.from_numpy(wrmsse_weights).float()
-            self.affected_ids = torch.from_numpy(affected_ids).long()
         else:
             self.Y = None
 
     def __len__(self):
-        return self.X_prev_day_sales.shape[1]
+        return self.norm_factor.shape[0]
 
     def __getitem__(self, idx):
         if self.window_id is not None:
-            X_calendar = self.X_calendar[self.window_id[idx]]
-            affected_ids = self.affected_ids[idx - (self.window_id[idx] * 30490)]
-            scale = self.rmsse_denominator[idx - (self.window_id[idx] * 30490)]
-            weight = self.wrmsse_weights[idx - (self.window_id[idx] * 30490)]
-            ids_idx = idx - (self.window_id[idx] * 30490)
+            time_range = self.window_time_range[self.window_id[idx]]
+            scale = self.rmsse_denominator[idx - (self.window_id[idx] * 42840)]
+            weight = self.wrmsse_weights[idx - (self.window_id[idx] * 42840)]
+            ids_idx = idx - (self.window_id[idx] * 42840)
             window_id = self.window_id[idx]
         else:
-            X_calendar = self.X_calendar
+            time_range = self.window_time_range
+            ids_idx = idx
+            window_id = 0
             if self.Y is not None:
-                affected_ids = self.affected_ids[idx]
                 scale = self.rmsse_denominator[idx]
                 weight = self.wrmsse_weights[idx]
-                ids_idx = idx
-                window_id = 0
 
-        enc_timesteps = self.X_prev_day_sales.shape[0]
-        dec_timesteps = self.X_enc_dec_feats.shape[0] - enc_timesteps
+        # Filter data for time range of the selected window, also normalize prev_day_sales and sell_price
+        norm_factor = self.norm_factor[idx]
+        X_calendar = self.X_calendar[time_range[0]:time_range[2]]
+
+        X_prev_day_sales = self.X_prev_day_sales[time_range[0]:time_range[1], ids_idx] / norm_factor
+        X_prev_day_sales_dec = self.X_prev_day_sales[time_range[1]:time_range[2], ids_idx] / norm_factor
+        X_prev_day_sales[X_prev_day_sales < 0] = -1.0
+        X_prev_day_sales_dec[X_prev_day_sales_dec < 0] = -1.0
+
+        if self.lagged_feats is not None:
+            X_lag_feats_enc = self.lagged_feats[time_range[0]:time_range[1], ids_idx] / norm_factor
+            X_lag_feats_dec = self.lagged_feats[time_range[1]:time_range[2], ids_idx] / norm_factor
+            X_lag_feats_enc[X_lag_feats_enc < 0] = -1.0
+            X_lag_feats_dec[X_lag_feats_dec < 0] = -1.0
+            # rolling features for decoder will be calculated on the fly (by including predictions for the prev steps)
+            X_roll_feats_enc = self.rolling_feats[time_range[0]:time_range[1], ids_idx] / norm_factor
+
+        # If training and if enabled in config, multiply sales features by random noise
+        # (new value will be lower bound by 0)
+        if self.config.add_random_noise and self.is_training:
+            if len(X_prev_day_sales[X_prev_day_sales >= 0]) > 0:
+                random_noise = np.clip(np.random.normal(1, X_prev_day_sales[X_prev_day_sales >= 0].std(),
+                                                        time_range[2] - time_range[0]), 0, None)
+                noise = np.ones_like(random_noise)
+                mask = np.random.choice([0, 1], size=noise.shape, p=((1 - self.config.noise_rate),
+                                                                     self.config.noise_rate)).astype(np.bool)
+                noise[mask] = random_noise[mask]
+
+                X_prev_day_sales[X_prev_day_sales >= 0] *= noise[:time_range[1] - time_range[0]][X_prev_day_sales >= 0]
+                X_prev_day_sales_dec[X_prev_day_sales_dec >= 0] *= noise[time_range[1]
+                                                                         - time_range[2]:][X_prev_day_sales_dec >= 0]
+
+            if self.lagged_feats is not None:
+                # lagged features
+                if len(X_lag_feats_enc[X_lag_feats_enc >= 0]) > 0:
+                    random_noise = np.clip(np.random.normal(1, X_lag_feats_enc[X_lag_feats_enc >= 0].std(0),
+                                                            [time_range[2] - time_range[0],
+                                                             X_lag_feats_enc.shape[1]]), 0, None)
+                    noise = np.ones_like(random_noise)
+                    mask = np.random.choice([0, 1], size=noise.shape, p=((1 - self.config.noise_rate),
+                                                                         self.config.noise_rate)).astype(np.bool)
+                    noise[mask] = random_noise[mask]
+
+                    X_lag_feats_enc[X_lag_feats_enc >= 0] *= noise[:time_range[1] - time_range[0]][X_lag_feats_enc >= 0]
+                    X_lag_feats_dec[X_lag_feats_dec >= 0] *= noise[time_range[1]
+                                                                   - time_range[2]:][X_lag_feats_dec >= 0]
+
+                # rolling features
+                random_noise = np.clip(np.random.normal(1, X_roll_feats_enc[:, :len(self.config.rolling)].std(0),
+                                                        [time_range[1] - time_range[0],
+                                                         len(self.config.rolling)]), 0, None)
+                noise = np.ones_like(random_noise)
+                mask = np.random.choice([0, 1], size=noise.shape, p=((1 - self.config.noise_rate),
+                                                                     self.config.noise_rate)).astype(np.bool)
+                noise[mask] = random_noise[mask]
+
+                X_roll_feats_enc[:, :len(self.config.rolling)] *= noise
+                X_roll_feats_enc[:, len(self.config.rolling):] *= noise
+
+        X_enc_dec_feats = self.X_enc_dec_feats[time_range[0]:time_range[2], ids_idx]
+
+        # Directly dividing the sell price column leads to memory explosion
+        norm_factor_sell_p = np.ones_like(X_enc_dec_feats, np.float64)
+        norm_factor_sell_p[:, 0] = self.norm_factor_sell_p[idx]
+        X_enc_dec_feats = X_enc_dec_feats / norm_factor_sell_p
+
+        if self.Y is not None:
+            Y = self.Y[ids_idx, time_range[1]:time_range[2]]
+
+        enc_timesteps = time_range[1] - time_range[0]
+        dec_timesteps = time_range[2] - time_range[0] - enc_timesteps
         num_embedding = 5
         num_cal_embedding = 2
 
         # input data for encoder
-        x_enc_dec_feats_enc = self.X_enc_dec_feats[:enc_timesteps, idx, :-num_embedding].reshape(enc_timesteps, -1)
-        # x_enc_only_feats = self.X_enc_only_feats[:, idx, :].reshape(enc_timesteps, -1)
-        x_prev_day_sales_enc = self.X_prev_day_sales[:, idx].reshape(-1, 1)
+        x_enc_dec_feats_enc = X_enc_dec_feats[:enc_timesteps, :-num_embedding].reshape(enc_timesteps, -1)
+
+        x_prev_day_sales_enc = X_prev_day_sales.reshape(-1, 1)
+        x_sales_feats_enc = x_prev_day_sales_enc if self.lagged_feats is None \
+            else np.concatenate([x_prev_day_sales_enc, X_lag_feats_enc, X_roll_feats_enc], 1)
+
         x_calendar_enc = X_calendar[:enc_timesteps, :-num_cal_embedding]
         x_calendar_enc_emb = X_calendar[:enc_timesteps, -num_cal_embedding:].reshape(enc_timesteps, -1)
-        # x_enc = np.concatenate([x_enc_dec_feats_enc, x_calendar_enc,
-        #                         x_prev_day_sales_enc, x_enc_only_feats], axis=1)
-        x_enc = np.concatenate([x_enc_dec_feats_enc, x_calendar_enc, x_prev_day_sales_enc], axis=1)
-        x_enc_emb = self.X_enc_dec_feats[:enc_timesteps, idx, -num_embedding:].reshape(enc_timesteps, -1)
+
+        x_enc = np.concatenate([x_enc_dec_feats_enc, x_calendar_enc, x_sales_feats_enc], axis=1)
+        x_enc_emb = X_enc_dec_feats[:enc_timesteps, -num_embedding:].reshape(enc_timesteps, -1)
 
         # input data for decoder
-        x_enc_dec_feats_dec = self.X_enc_dec_feats[enc_timesteps:, idx, :-num_embedding].reshape(dec_timesteps, -1)
+        x_enc_dec_feats_dec = X_enc_dec_feats[enc_timesteps:, :-num_embedding].reshape(dec_timesteps, -1)
         x_calendar_dec = X_calendar[enc_timesteps:, :-num_cal_embedding]
         x_calendar_dec_emb = X_calendar[enc_timesteps:, -num_cal_embedding:].reshape(dec_timesteps, -1)
-        x_last_day_sales = self.X_last_day_sales[idx].reshape(-1)
+
+        x_prev_day_sales_dec = X_prev_day_sales_dec.reshape(-1, 1)
+        x_sales_feats_dec = x_prev_day_sales_dec if self.lagged_feats is None \
+            else np.concatenate([x_prev_day_sales_dec, X_lag_feats_dec], 1)
+
         x_dec = np.concatenate([x_enc_dec_feats_dec, x_calendar_dec], axis=1)
-        x_dec_emb = self.X_enc_dec_feats[enc_timesteps:, idx, -num_embedding:].reshape(dec_timesteps, -1)
+        x_dec_emb = X_enc_dec_feats[enc_timesteps:, -num_embedding:].reshape(dec_timesteps, -1)
 
         if self.Y is None:
             return [[torch.from_numpy(x_enc).float(), torch.from_numpy(x_enc_emb).long(),
                      torch.from_numpy(x_calendar_enc_emb).long(),
                      torch.from_numpy(x_dec).float(), torch.from_numpy(x_dec_emb).long(),
                      torch.from_numpy(x_calendar_dec_emb).long(),
-                     torch.from_numpy(x_last_day_sales).float()], self.norm_factor[idx]]
+                     torch.from_numpy(x_sales_feats_dec).float()], norm_factor]
 
         return [[torch.from_numpy(x_enc).float(), torch.from_numpy(x_enc_emb).long(),
                  torch.from_numpy(x_calendar_enc_emb).long(),
                  torch.from_numpy(x_dec).float(), torch.from_numpy(x_dec_emb).long(),
                  torch.from_numpy(x_calendar_dec_emb).long(),
-                 torch.from_numpy(x_last_day_sales).float()],
-                self.Y[idx, :], torch.from_numpy(np.array(self.norm_factor[idx])).float(),
+                 torch.from_numpy(x_sales_feats_dec).float()],
+                Y, torch.from_numpy(np.array(norm_factor)).float(),
                 ids_idx,
                 [scale, weight],
-                affected_ids, window_id]
+                window_id]
 
 
 class DataLoader:
@@ -129,19 +206,21 @@ class DataLoader:
             data_dict = pkl.load(f)
 
         self.ids = data_dict['sales_data_ids']
+        self.enc_dec_feat_names = data_dict['enc_dec_feat_names']
+        self.sell_price_i = self.enc_dec_feat_names.index('sell_price')
         self.X_prev_day_sales = data_dict['X_prev_day_sales']
         self.X_enc_only_feats = data_dict['X_enc_only_feats']
         self.X_enc_dec_feats = data_dict['X_enc_dec_feats']
         self.X_calendar = data_dict['X_calendar']
         self.enc_dec_feat_names = data_dict['enc_dec_feat_names']
         self.Y = data_dict['Y']
-        self.n_windows = 1
 
-        # Get all affected series on sales update of each level 12 series (required for WRMSSELoss)
-        # Also, initialize predictions for WRMSSELoss calculation by replicating last month sales
-        self.train_prev_preds, _, self.affected_series_ids = get_aggregated_series(
-            self.Y[:, self.config.training_ts['horizon_start_t'] - 28:self.config.training_ts['horizon_start_t']],
-            self.ids)
+        # for prev_day_sales, set value as -1 for the period the product was not actively sold
+        self.X_prev_day_sales_unsold_negative = self.X_prev_day_sales.copy()
+        for idx, first_non_zero_idx in enumerate((self.X_prev_day_sales != 0).argmax(axis=0)):
+            self.X_prev_day_sales_unsold_negative[:first_non_zero_idx, idx] = -1
+
+        self.n_windows = 1
 
     def create_train_loader(self, data_start_t=None, horizon_start_t=None, horizon_end_t=None):
         if (data_start_t is None) | (horizon_start_t is None) | (horizon_end_t is None):
@@ -152,12 +231,14 @@ class DataLoader:
         # Run a sliding window of length "window_length" and train for the next month of each window
         if self.config.sliding_window:
             window_length = self.config.window_length
-            X_prev_day_sales, X_enc_only_feats, X_enc_dec_feats, X_calendar, Y, norm_factor = [], [], [], [], [], []
-            last_day_sales, weights, scales = [], [], []
+            window_time_range, norm_factor, norm_factor_sell_p = [], [], []
+            weights, scales = [], []
 
             for idx, i in enumerate(range(data_start_t + window_length, horizon_end_t, 28)):
                 w_data_start_t, w_horizon_start_t = data_start_t + (idx * 28), i
                 w_horizon_end_t = w_horizon_start_t + 28
+                window_time_range.append([w_data_start_t - data_start_t, w_horizon_start_t - data_start_t,
+                                          w_horizon_end_t - data_start_t])
 
                 # calculate denominator for rmsse loss
                 squared_movement = ((self.Y.T[:w_horizon_start_t] -
@@ -170,38 +251,31 @@ class DataLoader:
                     rmsse_den.append(den)
                 scales.append(np.array(rmsse_den))
 
-                # Get level 12 weights for WRMSSE loss (level 12)
-                sell_price_i = self.enc_dec_feat_names.index('sell_price')
+                # Get weights for WRMSSE and SPL loss
                 w_weights = get_weights_level_12(self.Y[:, w_horizon_start_t - 28:w_horizon_start_t],
-                                                 self.X_enc_dec_feats[w_horizon_start_t - 28:w_horizon_start_t, :,
-                                                 sell_price_i].T)
+                                                    self.X_enc_dec_feats[w_horizon_start_t - 28:w_horizon_start_t, :,
+                                                    self.sell_price_i].T)
                 weights.append(w_weights)
 
-                # Normalize sale features by dividing by median of each series (as per the selected input window)
-                w_X_prev_day_sales = self.X_prev_day_sales[w_data_start_t:w_horizon_start_t].copy().astype(float)
-                w_norm_factor = np.median(w_X_prev_day_sales, 0)
+                # Normalize sale features by dividing by mean of each series (as per the selected input window)
+                w_X_prev_day_sales_calc = self.X_prev_day_sales[w_data_start_t:w_horizon_start_t]
+                w_norm_factor = np.mean(w_X_prev_day_sales_calc, 0)
                 w_norm_factor[w_norm_factor == 0] = 1.
-                w_X_prev_day_sales = w_X_prev_day_sales / w_norm_factor
 
-                X_prev_day_sales.append(w_X_prev_day_sales)
-                X_enc_only_feats.append(self.X_enc_only_feats[w_data_start_t:w_horizon_start_t])
-                X_enc_dec_feats.append(self.X_enc_dec_feats[w_data_start_t:w_horizon_end_t])
-                X_calendar.append(self.X_calendar[w_data_start_t:w_horizon_end_t])
-                last_day_sales.append(w_X_prev_day_sales[-1])
+                w_X_sell_p = self.X_enc_dec_feats[w_data_start_t:w_horizon_start_t, :, self.sell_price_i].copy().astype(
+                    float)
+                w_norm_factor_sell_p = np.median(w_X_sell_p, 0)
+                w_norm_factor_sell_p[w_norm_factor_sell_p == 0] = 1.
                 norm_factor.append(w_norm_factor)
-                Y.append(self.Y[:, w_horizon_start_t:w_horizon_end_t])
+                norm_factor_sell_p.append(w_norm_factor_sell_p)
 
             self.n_windows = idx + 1
-            X_prev_day_sales = np.concatenate(X_prev_day_sales, 1)
-            X_enc_only_feats = np.concatenate(X_enc_only_feats, 1)
-            X_enc_dec_feats = np.concatenate(X_enc_dec_feats, 1)
-            X_calendar = np.stack(X_calendar, 0)
-            last_day_sales = np.concatenate(last_day_sales, 0)
-            Y = np.concatenate(Y, 0)
             scales = np.concatenate(scales, 0)
             weights = np.concatenate(weights, 0)
             norm_factor = np.concatenate(norm_factor, 0)
-            window_id = np.arange(idx + 1).repeat(self.X_enc_only_feats.shape[1])
+            norm_factor_sell_p = np.concatenate(norm_factor_sell_p, 0)
+            window_time_range = np.array(window_time_range)
+            window_id = np.arange(idx + 1).repeat(self.X_enc_dec_feats.shape[1])
 
         else:
             # calculate denominator for rmsse loss
@@ -209,39 +283,61 @@ class DataLoader:
                                  self.X_prev_day_sales[:horizon_start_t]).astype(np.int64) ** 2)
             actively_sold_in_range = (self.X_prev_day_sales[:horizon_start_t] != 0).argmax(axis=0)
             rmsse_den = []
-            for idx, first_active_sell_idx in enumerate(actively_sold_in_range):
-                den = squared_movement[first_active_sell_idx:, idx].mean()
+            for idx_active_sell, first_active_sell_idx in enumerate(actively_sold_in_range):
+                den = squared_movement[first_active_sell_idx:, idx_active_sell].mean()
                 den = den if den != 0 else 1
                 rmsse_den.append(den)
 
-            # Get level 12 weights for WRMSSE loss (level 12)
-            sell_price_i = self.enc_dec_feat_names.index('sell_price')
+            # Get weights for WRMSSE and SPL loss
             weights = get_weights_level_12(self.Y[:, horizon_start_t - 28:horizon_start_t],
                                            self.X_enc_dec_feats[horizon_start_t - 28:horizon_start_t, :,
-                                           sell_price_i].T)
+                                           self.sell_price_i].T)
 
-            # Normalize sale features by dividing by median of each series (as per the selected input window)
-            X_prev_day_sales = self.X_prev_day_sales[data_start_t:horizon_start_t].copy().astype(float)
-            norm_factor = np.median(X_prev_day_sales, 0)
+            # Normalize sale features by dividing by mean of each series (as per the selected input window)
+            X_prev_day_sales_calc = self.X_prev_day_sales[data_start_t:horizon_start_t]
+            norm_factor = np.mean(X_prev_day_sales_calc, 0)
             norm_factor[norm_factor == 0] = 1.
-            X_prev_day_sales = X_prev_day_sales / norm_factor
 
-            X_enc_only_feats = self.X_enc_only_feats[data_start_t:horizon_start_t]
-            X_enc_dec_feats = self.X_enc_dec_feats[data_start_t:horizon_end_t]
-            X_calendar = self.X_calendar[data_start_t:horizon_end_t]
-            last_day_sales = X_prev_day_sales[-1]
-            Y = self.Y[:, horizon_start_t:horizon_end_t]
+            X_sell_p = self.X_enc_dec_feats[data_start_t:horizon_start_t, :, self.sell_price_i].copy().astype(float)
+            norm_factor_sell_p = np.median(X_sell_p, 0)
+            norm_factor_sell_p[norm_factor_sell_p == 0] = 1.
+
+            window_time_range = np.array([0, horizon_start_t - data_start_t, horizon_end_t - data_start_t])
             scales = np.array(rmsse_den)
             window_id = None
 
-        dataset = CustomDataset(X_prev_day_sales,
-                                X_enc_only_feats,
-                                X_enc_dec_feats,
-                                X_calendar, last_day_sales,
-                                norm_factor,
-                                Y=Y,
-                                rmsse_denominator=scales, wrmsse_weights=weights,
-                                affected_ids=self.affected_series_ids, window_id=window_id)
+        # Add rolling and lag features
+        if self.config.lag_and_roll_feats:
+            max_prev_ts_req = max(self.config.lags + self.config.rolling)
+            lagged_feats = []
+            for lag_i in np.array(sorted(self.config.lags, reverse=True)):
+                lag_i_feat = np.roll(self.X_prev_day_sales_unsold_negative[data_start_t - max_prev_ts_req:]
+                                     .astype(np.int32), lag_i, axis=0)
+                lag_i_feat[:lag_i] = 0
+                lagged_feats.append(lag_i_feat)
+            lagged_feats = np.stack(lagged_feats, axis=2)[max_prev_ts_req:]
+
+            rolling_feats, roll_i_means, roll_i_stds = [], [], []
+            roll_df = pd.DataFrame(self.X_prev_day_sales[data_start_t - max_prev_ts_req:].astype(np.int32))
+            for roll_i in self.config.rolling:
+                roll_i_feat_mean = pd.DataFrame(roll_df).rolling(roll_i, axis=0).mean().fillna(0).values
+                roll_i_means.append(roll_i_feat_mean)
+            for roll_i in self.config.rolling:
+                roll_i_feat_std = pd.DataFrame(roll_df).rolling(roll_i, axis=0).std().fillna(0).values
+                roll_i_stds.append(roll_i_feat_std)
+            rolling_feats = np.stack(roll_i_means + roll_i_stds, 2)[max_prev_ts_req:]
+        else:
+            lagged_feats, rolling_feats = None, None
+
+        dataset = CustomDataset(self.X_prev_day_sales_unsold_negative[data_start_t:],
+                                self.X_enc_only_feats[data_start_t:],
+                                self.X_enc_dec_feats[data_start_t:],
+                                self.X_calendar[data_start_t:],
+                                norm_factor, norm_factor_sell_p, window_time_range,
+                                lagged_feats, rolling_feats,
+                                Y=self.Y[:, data_start_t:],
+                                rmsse_denominator=scales, wrmsse_weights=weights, window_id=window_id,
+                                config=self.config)
 
         return torch.utils.data.DataLoader(dataset=dataset, batch_size=self.config.batch_size, shuffle=True,
                                            num_workers=3, pin_memory=True)
@@ -262,25 +358,53 @@ class DataLoader:
             den = den if den != 0 else 1
             rmsse_den.append(den)
 
-        # Get level 12 weights for WRMSSE loss (level 12)
-        sell_price_i = self.enc_dec_feat_names.index('sell_price')
+        # Get weights for WRMSSE and SPL loss
         weights = get_weights_level_12(self.Y[:, horizon_start_t-28:horizon_start_t],
-                                       self.X_enc_dec_feats[horizon_start_t-28:horizon_start_t, :, sell_price_i].T)
+                                       self.X_enc_dec_feats[horizon_start_t-28:horizon_start_t, :, self.sell_price_i].T)
 
-        # Normalize sale features by dividing by median of each series (as per the selected input window)
-        X_prev_day_sales = self.X_prev_day_sales[data_start_t:horizon_start_t].copy().astype(float)
-        norm_factor = np.median(X_prev_day_sales, 0)
+        # Normalize sale features by dividing by mean of each series (as per the selected input window)
+        X_prev_day_sales_calc = self.X_prev_day_sales[data_start_t:horizon_start_t]
+        norm_factor = np.mean(X_prev_day_sales_calc, 0)
         norm_factor[norm_factor == 0] = 1.
-        X_prev_day_sales = X_prev_day_sales / norm_factor
 
-        dataset = CustomDataset(X_prev_day_sales,
-                                self.X_enc_only_feats[data_start_t:horizon_start_t],
-                                self.X_enc_dec_feats[data_start_t:horizon_end_t],
-                                self.X_calendar[data_start_t:horizon_end_t], X_prev_day_sales[-1],
-                                norm_factor,
-                                Y=self.Y[:, horizon_start_t:horizon_end_t],
+        X_sell_p = self.X_enc_dec_feats[data_start_t:horizon_start_t, :, self.sell_price_i].copy().astype(float)
+        norm_factor_sell_p = np.median(X_sell_p, 0)
+        norm_factor_sell_p[norm_factor_sell_p == 0] = 1.
+
+        window_time_range = [0, horizon_start_t - data_start_t, horizon_end_t - data_start_t]
+
+        # Add rolling and lag features
+        if self.config.lag_and_roll_feats:
+            max_prev_ts_req = max(self.config.lags + self.config.rolling)
+            lagged_feats = []
+            for lag_i in np.array(sorted(self.config.lags, reverse=True)):
+                lag_i_feat = np.roll(self.X_prev_day_sales_unsold_negative[data_start_t - max_prev_ts_req:]
+                                     .astype(np.int32), lag_i, axis=0)
+                lag_i_feat[:lag_i] = 0
+                lagged_feats.append(lag_i_feat)
+            lagged_feats = np.stack(lagged_feats, axis=2)[max_prev_ts_req:]
+
+            rolling_feats, roll_i_means, roll_i_stds = [], [], []
+            roll_df = pd.DataFrame(self.X_prev_day_sales[data_start_t - max_prev_ts_req:].astype(np.int32))
+            for roll_i in self.config.rolling:
+                roll_i_feat_mean = pd.DataFrame(roll_df).rolling(roll_i, axis=0).mean().fillna(0).values
+                roll_i_means.append(roll_i_feat_mean)
+            for roll_i in self.config.rolling:
+                roll_i_feat_std = pd.DataFrame(roll_df).rolling(roll_i, axis=0).std().fillna(0).values
+                roll_i_stds.append(roll_i_feat_std)
+            rolling_feats = np.stack(roll_i_means + roll_i_stds, 2)[max_prev_ts_req:]
+        else:
+            lagged_feats, rolling_feats = None, None
+
+        dataset = CustomDataset(self.X_prev_day_sales_unsold_negative[data_start_t:],
+                                self.X_enc_only_feats[data_start_t:],
+                                self.X_enc_dec_feats[data_start_t:],
+                                self.X_calendar[data_start_t:],
+                                norm_factor, norm_factor_sell_p, window_time_range,
+                                lagged_feats, rolling_feats,
+                                Y=self.Y[:, data_start_t:],
                                 rmsse_denominator=np.array(rmsse_den), wrmsse_weights=weights,
-                                affected_ids=self.affected_series_ids)
+                                config=self.config, is_training=False)
 
         return torch.utils.data.DataLoader(dataset=dataset, batch_size=self.config.batch_size, num_workers=3,
                                            pin_memory=True)
@@ -291,17 +415,46 @@ class DataLoader:
             horizon_start_t = self.config.test_ts['horizon_start_t']
             horizon_end_t = self.config.test_ts['horizon_end_t']
 
-        # Normalize sale features by dividing by median of each series (as per the selected input window)
-        X_prev_day_sales = self.X_prev_day_sales[data_start_t:horizon_start_t].copy().astype(float)
-        norm_factor = np.median(X_prev_day_sales, 0)
+        # Normalize sale features by dividing by mean of each series (as per the selected input window)
+        X_prev_day_sales_calc = self.X_prev_day_sales[data_start_t:horizon_start_t]
+        norm_factor = np.mean(X_prev_day_sales_calc, 0)
         norm_factor[norm_factor == 0] = 1.
-        X_prev_day_sales = X_prev_day_sales / norm_factor
 
-        dataset = CustomDataset(X_prev_day_sales,
-                                self.X_enc_only_feats[data_start_t:horizon_start_t],
-                                self.X_enc_dec_feats[data_start_t:horizon_end_t],
-                                self.X_calendar[data_start_t:horizon_end_t], X_prev_day_sales[-1],
-                                norm_factor)
+        X_sell_p = self.X_enc_dec_feats[data_start_t:horizon_start_t, :, self.sell_price_i].copy().astype(float)
+        norm_factor_sell_p = np.median(X_sell_p, 0)
+        norm_factor_sell_p[norm_factor_sell_p == 0] = 1.
+
+        window_time_range = [0, horizon_start_t - data_start_t, horizon_end_t - data_start_t]
+
+        # Add rolling and lag features
+        if self.config.lag_and_roll_feats:
+            max_prev_ts_req = max(self.config.lags + self.config.rolling)
+            lagged_feats = []
+            for lag_i in np.array(sorted(self.config.lags, reverse=True)):
+                lag_i_feat = np.roll(self.X_prev_day_sales_unsold_negative[data_start_t - max_prev_ts_req:]
+                                     .astype(np.int32), lag_i, axis=0)
+                lag_i_feat[:lag_i] = 0
+                lagged_feats.append(lag_i_feat)
+            lagged_feats = np.stack(lagged_feats, axis=2)[max_prev_ts_req:]
+
+            rolling_feats, roll_i_means, roll_i_stds = [], [], []
+            roll_df = pd.DataFrame(self.X_prev_day_sales[data_start_t - max_prev_ts_req:].astype(np.int32))
+            for roll_i in self.config.rolling:
+                roll_i_feat_mean = pd.DataFrame(roll_df).rolling(roll_i, axis=0).mean().fillna(0).values
+                roll_i_means.append(roll_i_feat_mean)
+            for roll_i in self.config.rolling:
+                roll_i_feat_std = pd.DataFrame(roll_df).rolling(roll_i, axis=0).std().fillna(0).values
+                roll_i_stds.append(roll_i_feat_std)
+            rolling_feats = np.stack(roll_i_means + roll_i_stds, 2)[max_prev_ts_req:]
+        else:
+            lagged_feats, rolling_feats = None, None
+
+        dataset = CustomDataset(self.X_prev_day_sales_unsold_negative[data_start_t:],
+                                self.X_enc_only_feats[data_start_t:],
+                                self.X_enc_dec_feats[data_start_t:],
+                                self.X_calendar[data_start_t:],
+                                norm_factor, norm_factor_sell_p, window_time_range,
+                                lagged_feats, rolling_feats, config=self.config, is_training=False)
 
         return torch.utils.data.DataLoader(dataset=dataset, batch_size=self.config.batch_size, num_workers=3,
                                            pin_memory=True)
@@ -310,11 +463,10 @@ class DataLoader:
         """Returns aggregated target, weights and rmsse scaling factors for series of all 12 levels"""
 
         # Get aggregated series
-        agg_series_Y, agg_series_id, _ = get_aggregated_series(self.Y[:, data_start_t:horizon_end_t], self.ids)
-        agg_target = agg_series_Y[:, horizon_start_t - data_start_t:]
-        agg_series_Y = agg_series_Y[:, :horizon_start_t - data_start_t]
-        agg_series_prev_day_sales, _, _ = get_aggregated_series(
-            self.X_prev_day_sales.T[:, data_start_t:horizon_start_t], self.ids)
+        agg_series_Y, agg_series_id, _ = get_aggregated_series(self.Y[:, :horizon_end_t], self.ids)
+        agg_target = agg_series_Y[:, horizon_start_t:]
+        agg_series_Y = agg_series_Y[:, :horizon_start_t]
+        agg_series_prev_day_sales, _, _ = get_aggregated_series(self.X_prev_day_sales.T[:, :horizon_start_t], self.ids)
 
         # calculate denominator for rmsse loss
         squared_movement = ((agg_series_Y.T - agg_series_prev_day_sales.T).astype(np.int64) ** 2)
@@ -326,9 +478,9 @@ class DataLoader:
             rmsse_den.append(den)
 
         # Get weights
-        sell_price_i = self.enc_dec_feat_names.index('sell_price')
         weights, _ = get_weights_all_levels(self.Y[:, horizon_start_t-28:horizon_start_t],
-                                            self.X_enc_dec_feats[horizon_start_t-28:horizon_start_t, :, sell_price_i].T,
+                                            self.X_enc_dec_feats[horizon_start_t-28:horizon_start_t, :,
+                                            self.sell_price_i].T,
                                             self.ids)
 
         return agg_target, weights, np.array(rmsse_den)
