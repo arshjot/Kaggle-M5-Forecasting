@@ -9,13 +9,13 @@ class Config:
     loss_fn = 'SPLLoss'
     metric = 'SPLMetric'
     secondary_metric = 'WRMSSEMetric'
-    architecture = 'dilated_seq2seq'
+    architecture = 'seq2seq_w_attn_on_hid'
 
     # Running a sliding window training will help increase the training data
     sliding_window = True  # Note: sliding window has not been tested with WRMSSELoss
     window_length = 28 * 13
 
-    lag_and_roll_feats = True  # Note: Currently only works with dilated_seq2seq architecture
+    lag_and_roll_feats = True  # Note: Currently only works with dilated_seq2seq & seq2seq_w_attn_on_hid architectures
     lags = list(range(27, 42))
     rolling = [7, 14, 30, 60, 180]
 
@@ -45,7 +45,7 @@ class Config:
     learning_rate = 0.0003
 
     # training, validation and test periods
-    training_ts = {'data_start_t': 1969 - 1 - (28 * 28), 'horizon_start_t': 1969 - 1 - (28 * 3),
+    training_ts = {'data_start_t': 1969 - 1 - (28 * 29), 'horizon_start_t': 1969 - 1 - (28 * 3),
                    'horizon_end_t': 1969 - 1 - (28 * 2)}
     validation_ts = {'data_start_t': 1969 - 1 - (28 * 15), 'horizon_start_t': 1969 - 1 - (28 * 2),
                      'horizon_end_t': 1969 - 1 - (28 * 1)}
@@ -56,11 +56,11 @@ class Config:
     k_fold = True
     k_fold_splits = [(f_train_ts, f_val_ts) for f_train_ts, f_val_ts in
                      zip([
-                         {'data_start_t': 1969 - 1 - (28 * 30), 'horizon_start_t': 1969 - 1 - (28 * 5),
+                         {'data_start_t': 1969 - 1 - (28 * 31), 'horizon_start_t': 1969 - 1 - (28 * 5),
                           'horizon_end_t': 1969 - 1 - (28 * 4)},
-                         {'data_start_t': 1969 - 1 - (28 * 29), 'horizon_start_t': 1969 - 1 - (28 * 4),
+                         {'data_start_t': 1969 - 1 - (28 * 30), 'horizon_start_t': 1969 - 1 - (28 * 4),
                           'horizon_end_t': 1969 - 1 - (28 * 3)},
-                         {'data_start_t': 1969 - 1 - (28 * 28), 'horizon_start_t': 1969 - 1 - (28 * 3),
+                         {'data_start_t': 1969 - 1 - (28 * 29), 'horizon_start_t': 1969 - 1 - (28 * 3),
                           'horizon_end_t': 1969 - 1 - (28 * 2)}
                      ], [
                          {'data_start_t': 1969 - 1 - (28 * 17), 'horizon_start_t': 1969 - 1 - (28 * 4),
