@@ -50,8 +50,8 @@ class SubmissionGenerator:
 
     def _prepare_dir(self):
         print(f' Create submission directory '.center(self.terminal_width, '*'))
-        subs = [int(i[3:]) for i in glob(os.path.join('./submissions', "*", ""))]
-        print(subs)
+        subs = [int(i[:i.rfind('/')][i[:i.rfind('/')].rfind('/') + 1:][3:])
+                for i in glob(os.path.join('./submissions', "*", ""))]
         sub_idx = max(subs) + 1 if len(subs) > 0 else 1
 
         os.makedirs(f'./submissions/sub{sub_idx}')
