@@ -200,8 +200,9 @@ def create_model(config):
     # for item_id, dept_id, cat_id, store_id, state_id respectively
     embedding_sizes = [(3049 + 1, 50), (7 + 1, 4), (3 + 1, 2), (10 + 1, 5), (3 + 1, 2)]
     cal_embedding_sizes = (31, 16)
-    num_features_enc = 12 + sum([j for i, j in embedding_sizes]) + cal_embedding_sizes[1] * 2
-    num_features_dec = 12 + sum([j for i, j in embedding_sizes]) + cal_embedding_sizes[1] * 2
+    num_lag_roll_feats = len(config.lags) + (len(config.rolling) * 2) if config.lag_and_roll_feats else 0
+    num_features_enc = 12 + sum([j for i, j in embedding_sizes]) + cal_embedding_sizes[1] * 2 + num_lag_roll_feats
+    num_features_dec = 12 + sum([j for i, j in embedding_sizes]) + cal_embedding_sizes[1] * 2 + num_lag_roll_feats
     enc = Encoder(num_features_enc, embedding_sizes, cal_embedding_sizes, config)
     dec = AttnDecoder(num_features_dec, embedding_sizes, cal_embedding_sizes, 9, config)
     model = Seq2Seq(enc, dec, config)

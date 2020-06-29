@@ -5,6 +5,7 @@ from importlib import import_module
 import shutil
 import glob
 import os
+import sys
 
 from data_loader.data_generator import DataLoader
 from utils.data_utils import *
@@ -206,6 +207,8 @@ class Trainer:
 
 
 if __name__ == "__main__":
+    # sys.stdout = open('train.log', 'w')
+    # sys.stderr = sys.stdout
     config = Config
     terminal_width = shutil.get_terminal_size((80, 20)).columns
     # Check if k-fold training is enabled

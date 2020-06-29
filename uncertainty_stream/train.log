@@ -1,0 +1,69 @@
+**************************************************************************************** K-fold Training *****************************************************************************************
+
+******************************************************************************************* Fold [1/3] *******************************************************************************************
+************************************************************************************* Model: dilated_seq2seq *************************************************************************************
+Seq2Seq(
+  (encoder): Encoder(
+    (embeddings): ModuleList(
+      (0): Embedding(3050, 50)
+      (1): Embedding(8, 4)
+      (2): Embedding(4, 2)
+      (3): Embedding(11, 5)
+      (4): Embedding(4, 2)
+    )
+    (cal_embedding): Embedding(31, 16)
+    (drnns): ModuleList(
+      (0): DRNN(
+        (rnn_dropouts): ModuleList(
+          (0): Dropout(p=0.2, inplace=False)
+        )
+        (cells): Sequential(
+          (0): LSTM(107, 20)
+          (1): LSTM(20, 20)
+        )
+      )
+      (1): DRNN(
+        (rnn_dropouts): ModuleList(
+          (0): Dropout(p=0.2, inplace=False)
+        )
+        (cells): Sequential(
+          (0): LSTM(107, 20)
+          (1): LSTM(20, 20)
+        )
+      )
+    )
+  )
+  (decoder): Decoder(
+    (embeddings): ModuleList(
+      (0): Embedding(3050, 50)
+      (1): Embedding(8, 4)
+      (2): Embedding(4, 2)
+      (3): Embedding(11, 5)
+      (4): Embedding(4, 2)
+    )
+    (cal_embedding): Embedding(31, 16)
+    (rnn): LSTM(107, 20, num_layers=2, bidirectional=True)
+    (pred): Linear(in_features=40, out_features=9, bias=True)
+  )
+  (fc_h0): Linear(in_features=6, out_features=4, bias=True)
+  (fc_h1): Linear(in_features=6, out_features=4, bias=True)
+)
+
+****************************************************************************************** Loading Data ******************************************************************************************
+******************************************************************************************** Training ********************************************************************************************
+
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx Epoch [1/2] xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+Training Loss: 1.1261, Training Error: 1.1261, Training Secondary Error: 64.7784
+Validation Loss: 0.3252, Validation Error: 0.3252, Validation Secondary Error: 34.7954
+Best model obtained at the end of epoch 1
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx Epoch [2/2] xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+Traceback (most recent call last):
+  File "train.py", line 231, in <module>
+    trainer.train()
+  File "train.py", line 152, in train
+    loss.backward()
+  File "/home/arsh/venvs/torch/lib/python3.7/site-packages/torch/tensor.py", line 195, in backward
+    torch.autograd.backward(self, gradient, retain_graph, create_graph)
+  File "/home/arsh/venvs/torch/lib/python3.7/site-packages/torch/autograd/__init__.py", line 99, in backward
+    allow_unreachable=True)  # allow_unreachable flag
+KeyboardInterrupt
