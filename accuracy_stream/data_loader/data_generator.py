@@ -68,9 +68,9 @@ class CustomDataset(data_utils.Dataset):
     def __getitem__(self, idx):
         if self.window_id is not None:
             time_range = self.window_time_range[self.window_id[idx]]
-            scale = self.rmsse_denominator[idx - (self.window_id[idx] * 42840)]
-            weight = self.wrmsse_weights[idx - (self.window_id[idx] * 42840)]
-            ids_idx = idx - (self.window_id[idx] * 42840)
+            scale = self.rmsse_denominator[idx - (self.window_id[idx] * 30490)]
+            weight = self.wrmsse_weights[idx - (self.window_id[idx] * 30490)]
+            ids_idx = idx - (self.window_id[idx] * 30490)
             window_id = self.window_id[idx]
         else:
             time_range = self.window_time_range
@@ -253,8 +253,8 @@ class DataLoader:
 
                 # Get weights for WRMSSE and SPL loss
                 w_weights = get_weights_level_12(self.Y[:, w_horizon_start_t - 28:w_horizon_start_t],
-                                                    self.X_enc_dec_feats[w_horizon_start_t - 28:w_horizon_start_t, :,
-                                                    self.sell_price_i].T)
+                                                 self.X_enc_dec_feats[w_horizon_start_t - 28:w_horizon_start_t, :,
+                                                 self.sell_price_i].T)
                 weights.append(w_weights)
 
                 # Normalize sale features by dividing by mean of each series (as per the selected input window)

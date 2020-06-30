@@ -36,8 +36,8 @@ class Trainer:
         self.criterion = getattr(loss_functions, self.config.loss_fn)(self.config)
         self.optimizer = torch.optim.RMSprop(self.model.parameters(), lr=self.config.learning_rate, alpha=0.95)
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, factor=0.5,
-                                                                    patience=4, verbose=True)
-        self.early_stopping = EarlyStopping(patience=12)
+                                                                    patience=3, verbose=True)
+        self.early_stopping = EarlyStopping(patience=10)
         self.loss_agg = np.sum if config.loss_fn == 'WRMSSELevel12Loss' else np.mean
 
         # Metric
