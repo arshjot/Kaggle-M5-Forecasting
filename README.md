@@ -9,6 +9,8 @@ This repository includes:
 (applied from all encoder outputs to hidden state of each step in the decoder)
 - Options for sliding window training, rolling and lag features, and addition of random noise while training
 
+Please refer to [my Kaggle post](https://www.kaggle.com/c/m5-forecasting-uncertainty/discussion/163389) for additional information.
+
 ## Steps for training the model and generating submissions
 
 Steps are identical for both the streams. They have been given below:
