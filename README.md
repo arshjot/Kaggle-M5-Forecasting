@@ -44,7 +44,7 @@ Accuracy Stream
 
 | Model Architecture        | Details | Private Leaderboard Score | Private Leaderboard Rank
 |:-------------------------:|:-------:|:-------------------------:|:-----------------------:|
-| seq2seq_w_attn_on_hid | Sliding window training (window length = 28*13), 3-fold validation on last 3 28-day periods | 0.68081 | 482
+| seq2seq_w_attn_on_hid | Sliding window training (window length = 28*13), 3-fold validation on last 3 28-day periods | 0.68081 | 482 (top 9%)
 
 
 \
@@ -54,7 +54,7 @@ Uncertainty Stream
 |:-------------------------:|:-------:|:-------------------------:|:-----------------------:|
 | seq2seq_w_attn_on_hid                                 | Sliding window training (window length = 28*13), 3-fold validation on last 3 28-day periods | 0.18317 | NA
 | dilated_seq2seq                                       | Sliding window training (window length = 28*13), 3-fold validation on last 3 28-day periods | 0.18068 | NA
-| Ensemble of seq2seq_w_attn_on_hid and dilated_seq2seq | Sliding window training (window length = 28*13), 3-fold validation on last 3 28-day periods | 0.17850 | 48
+| Ensemble of seq2seq_w_attn_on_hid and dilated_seq2seq | Sliding window training (window length = 28*13), 3-fold validation on last 3 28-day periods | 0.17850 | 48 (top 6%)
 
 ## Citations
 - [PyTorch implementation of Dilated Recurrent Neural Networks (DilatedRNN)](https://github.com/zalandoresearch/pytorch-dilated-rnn)
