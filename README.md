@@ -27,7 +27,7 @@ Steps are identical for both the streams. They have been given below:
     ```bash
     python prepare_data.py
     ```
-    This will prepare the data for training and evaluation by merging different data files and creating required features.
+    This will prepare the data for training and evaluation by merging different data files and creating the required features.
 4. Start model training by running the below command from the root directory of the stream under consideration:
     ```bash
     python train.py
@@ -43,7 +43,7 @@ Steps are identical for both the streams. They have been given below:
 Accuracy Stream
 
 | Model Architecture        | Details | Private Leaderboard Score | Private Leaderboard Rank
-|:-----------|:-----------:|:-------:|:-------:|
+|:-------------------------:|:-------:|:-------------------------:|:-----------------------:|
 | seq2seq_w_attn_on_hid | Sliding window training (window length = 28*13), 3-fold validation on last 3 28-day periods | 0.68081 | 482
 
 
@@ -51,9 +51,9 @@ Accuracy Stream
 Uncertainty Stream
 
 | Model Architecture        | Details | Private Leaderboard Score | Private Leaderboard Rank
-|:-----------|:-----------:|:-------:|:-------:|
-| seq2seq_w_attn_on_hid | Sliding window training (window length = 28*13), 3-fold validation on last 3 28-day periods | 0.18317 | NA
-| dilated_seq2seq | Sliding window training (window length = 28*13), 3-fold validation on last 3 28-day periods | 0.18068 | NA
+|:-------------------------:|:-------:|:-------------------------:|:-----------------------:|
+| seq2seq_w_attn_on_hid                                 | Sliding window training (window length = 28*13), 3-fold validation on last 3 28-day periods | 0.18317 | NA
+| dilated_seq2seq                                       | Sliding window training (window length = 28*13), 3-fold validation on last 3 28-day periods | 0.18068 | NA
 | Ensemble of seq2seq_w_attn_on_hid and dilated_seq2seq | Sliding window training (window length = 28*13), 3-fold validation on last 3 28-day periods | 0.17850 | 48
 
 ## Citations
